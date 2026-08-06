@@ -8,18 +8,16 @@ __pycache__/
 .claude
 .codex
 
-# Large/regeneratable data and outputs -- see perri_validation/README.md
-# ("Portability" section: copy the perri_validation/ folder, nothing else required,
-# but data/outputs are site-specific and shouldn't be committed).
-perri_validation/data/*
-perri_validation/outputs/
+# Large/regeneratable data and outputs -- see README.md
+data/*
+outputs/
 *.csv
 *.csv.gz
 *.pkl
 
 # ignore scoping markdown files (they're for local viewing only)
-perri_validation/scoping*.md
+scoping*.md
 
 # Example files (tracked despite the blanket rules above)
-!perri_validation/data/examples/
-!perri_validation/data/examples/*.csv
+!data/examples/
+!data/examples/*.csv
