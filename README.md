@@ -110,11 +110,7 @@ The use for this is
   
   2. Clinical reclassification confusion matrices and Kaplan-Meier logic require pop_ri bounds. 
   
-  An exception is one-sided markers (only HDL, which has an infinite upper bound, where only "too low" is
-  clinically abnormal). Because `pop_ri`'s formula needs a finite width, we call `_params_override` 
-  which computes an empirical (patch_lower, patch_upper)
-  reference interval. This falls back to `perri`'s default bundled `min_mu`/`max_mu`/`max_sigma`
-  if the input `Tests` population has no isolated data at all to compute a patch from.
+An exception is one-sided markers (only HDL, which has an infinite upper bound, where only "too low" is clinically abnormal). These markers are auto-detected, and `_params_override` will calculate an empirical reference interval.
 
 
 ## Parallelization

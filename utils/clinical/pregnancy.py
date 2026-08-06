@@ -169,9 +169,13 @@ def _fit_univariate_logit(df: pd.DataFrame, outcome_col: str, feature: str) -> d
             warnings.simplefilter("ignore")
             model = sm.Logit(y, X).fit(disp=0)
         conf = model.conf_int()
-        est = float(np.exp(model.params["x"]))
-        lo = float(np.exp(conf.loc["x", 0]))
-        hi = float(np.exp(conf.loc["x", 1]))
+        # A large coefficient (near-quasi-separation, common with small n) overflows exp()
+        # to inf -- already handled below (isfinite check discards it), so the overflow
+        # itself isn't a bug, just numpy being noisy about an expected outcome.
+        with np.errstate(over="ignore"):
+            est = float(np.exp(model.params["x"]))
+            lo = float(np.exp(conf.loc["x", 0]))
+            hi = float(np.exp(conf.loc["x", 1]))
         if not all(np.isfinite([est, lo, hi])):
             return row
         row["or"], row["ci_lower"], row["ci_upper"], row["fit_ok"] = est, lo, hi, True

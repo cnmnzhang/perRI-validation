@@ -422,7 +422,7 @@ def fig3baseline_on_axes(axes, hr_df: pd.DataFrame, ioi_order: list, variables=(
         handles = [legend_handles_map[b] for b in filtered_order]
         axes_arr[0, 0].legend(
             handles,
-            labels=filtered_order,
+            filtered_order,
             title="Number of Tests Used:",
             title_fontsize=FONT_SIZE_TICK_LABEL,
             loc="upper left",
