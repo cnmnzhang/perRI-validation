@@ -11,7 +11,7 @@ import pytest
 
 import scripts.run_fig3_hazard as m
 import utils.setpoints as setpoints_module
-from scripts.run_fig3_hazard import run
+from scripts.run_fig3_hazard import _filter_invalid_cv_patients, _filter_sp_df, run
 from utils.setpoints import compute_sp_df
 
 
@@ -112,3 +112,99 @@ def test_force_rebuilds_plot_data_but_does_not_refresh_the_setpoint_dependency(t
     out = capsys.readouterr().out
     assert "[cache] hit sp_df_HB_full_m" in out
     assert "[cache] miss sp_df_HB_full_m" not in out
+
+
+def _sp_row(anon_id, test_code, index, mu, sigma, model="bayesian"):
+    return {"anon_id": anon_id, "test_code": test_code, "model": model, "mu": mu, "sigma": sigma, "index": index}
+
+
+def test_filter_invalid_cv_patients_drops_whole_sequence_on_negative_cv():
+    """Regression: bayesian-setpoint-inference's filter_sp_df drops a patient's *entire*
+    setpoint sequence for a marker if any measurement from index>=3 onward has cv < 0 --
+    not just the offending row. p1 has one bad row at index 3; all 4 of p1's rows must go."""
+    sp_df = pd.DataFrame(
+        [
+            _sp_row("p1", "HB", 0, mu=13.0, sigma=1.0),
+            _sp_row("p1", "HB", 1, mu=13.0, sigma=1.0),
+            _sp_row("p1", "HB", 2, mu=13.0, sigma=1.0),
+            _sp_row("p1", "HB", 3, mu=13.0, sigma=-1.0),  # cv = -0.077 -- invalid
+            _sp_row("p2", "HB", 0, mu=13.0, sigma=1.0),
+            _sp_row("p2", "HB", 3, mu=13.0, sigma=1.0),  # cv = 0.077 -- valid
+        ]
+    )
+    out = _filter_invalid_cv_patients(sp_df)
+    assert set(out["anon_id"]) == {"p2"}
+    assert len(out) == 2
+
+
+def test_filter_invalid_cv_patients_ignores_index_below_3():
+    """The cv guard only applies from the 4th isolated measurement (index>=3) onward --
+    an early negative cv (still stabilizing) must not drop the patient."""
+    sp_df = pd.DataFrame(
+        [
+            _sp_row("p1", "HB", 0, mu=13.0, sigma=-1.0),  # invalid cv, but index < 3
+            _sp_row("p1", "HB", 1, mu=13.0, sigma=1.0),
+        ]
+    )
+    out = _filter_invalid_cv_patients(sp_df)
+    assert len(out) == 2
+
+
+def test_filter_invalid_cv_patients_allows_cv_above_1_for_log_transform_markers():
+    """Non-log markers reject cv > 1; log-transform markers (e.g. HSCRP) legitimately
+    exceed 1 after the lognormal back-transform and must not be dropped for that alone."""
+    sp_df = pd.DataFrame(
+        [
+            _sp_row("p1", "HSCRP", 3, mu=1.0, sigma=5.0),  # cv = 5.0, but HSCRP is log-transform -- valid
+            _sp_row("p2", "HB", 3, mu=13.0, sigma=20.0),  # cv > 1, HB is not log-transform -- invalid
+        ]
+    )
+    out = _filter_invalid_cv_patients(sp_df)
+    assert set(out["anon_id"]) == {"p1"}
+
+
+def _sp_row_ts(anon_id, test_code, index, ts, mu=13.0, sigma=1.0, model="bayesian"):
+    return {"anon_id": anon_id, "test_code": test_code, "model": model, "mu": mu, "sigma": sigma, "index": index, "ts": pd.Timestamp(ts)}
+
+
+def test_filter_sp_df_drops_whole_sequence_below_min_measurements():
+    """Regression: a patient with only 3-4 isolated measurements passes compute_sp_df's
+    looser fitting bar (DEFAULT_MIN_MEASUREMENTS=3) and gets fit, contributing rows at low
+    baseline indices -- but bayesian-setpoint-inference's filter_sp_df requires 5 total
+    measurements (MIN_MEASUREMENTS_FOR_FILTER) before considering a patient at all. Without
+    this, low-baseline-index cohorts were inflated ~5.7x ground truth's n at baseline_index=1."""
+    sp_df = pd.DataFrame(
+        [
+            _sp_row_ts("p1", "HB", 0, "2015-01-01"),
+            _sp_row_ts("p1", "HB", 1, "2015-06-01"),
+            _sp_row_ts("p1", "HB", 2, "2016-01-01"),  # only 3 rows -- must be dropped entirely
+            _sp_row_ts("p2", "HB", 0, "2015-01-01"),
+            _sp_row_ts("p2", "HB", 1, "2015-06-01"),
+            _sp_row_ts("p2", "HB", 2, "2016-01-01"),
+            _sp_row_ts("p2", "HB", 3, "2016-06-01"),
+            _sp_row_ts("p2", "HB", 4, "2017-01-01"),  # 5 rows -- must survive
+        ]
+    )
+    out = _filter_sp_df(sp_df)
+    assert set(out["anon_id"]) == {"p2"}
+    assert len(out) == 5
+
+
+def test_filter_sp_df_date_filter_can_push_a_patient_below_the_min_measurements_bar():
+    """The date filter runs *before* the min-measurements count, per filter_sp_df's own
+    order -- a measurement at/after MAX_FIT_DATE doesn't count toward the bar, and can drop
+    an otherwise-5-measurement patient below it."""
+    from constants.runtime import MAX_FIT_DATE
+
+    late_ts = pd.Timestamp(MAX_FIT_DATE) + pd.Timedelta(days=1)
+    sp_df = pd.DataFrame(
+        [
+            _sp_row_ts("p1", "HB", 0, "2015-01-01"),
+            _sp_row_ts("p1", "HB", 1, "2015-06-01"),
+            _sp_row_ts("p1", "HB", 2, "2016-01-01"),
+            _sp_row_ts("p1", "HB", 3, "2016-06-01"),
+            _sp_row_ts("p1", "HB", 4, late_ts),  # after MAX_FIT_DATE -- doesn't count
+        ]
+    )
+    out = _filter_sp_df(sp_df)
+    assert out.empty

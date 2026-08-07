@@ -226,7 +226,7 @@ def _write_tests_csv(input_dir, test_codes=("HB", "GLU", "HDL", "WBC"), n_patien
 
 def test_load_tests_marker_subset_raises_when_split_not_built(tmp_path):
     """Unlike the earlier design, load_tests_marker_subset never builds the split
-    itself -- build_tests_by_marker (run via perri_validation.scripts.run_tests_by_marker)
+    itself -- build_tests_by_marker (run via scripts.run_tests_by_marker)
     is now an explicit prerequisite, like run_dx_incident is for dx_incident.csv."""
     _write_tests_csv(tmp_path)
     with pytest.raises(FileNotFoundError, match="run_tests_by_marker"):

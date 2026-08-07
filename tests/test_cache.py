@@ -1,7 +1,7 @@
 """Tests for utils/cache.py: cache_or_compute + hash_dataframe.
 
-Uses the low-level perri_validation.utils.cache.cache_or_compute (which takes a
-full path) rather than perri_validation.utils.setpoints's rooted wrapper (which
+Uses the low-level utils.cache.cache_or_compute (which takes a
+full path) rather than utils.setpoints's rooted wrapper (which
 always roots at the real data/cache/) -- tests must never touch
 the real, shared cache directory. These tests are deliberately isolated via
 tmp_path.

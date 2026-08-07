@@ -87,6 +87,22 @@ def test_matches_dot_free_raw_codes_against_dotted_config():
     assert dx_incident["diagnosis_name"].iloc[0] == "Cirrhosis"
 
 
+def test_prefers_icd9_over_icd10_by_default_when_both_present():
+    """Regression: this project's default briefly drifted to prefer="icd10", diverging
+    from bayesian-setpoint-inference's dx_all_to_first_fast (utils/clinical_icd.py) and its
+    non-vectorized reference implementation (match_icd_to_dx), both of which hardcode
+    icd9-first -- icd10 is only ever a fallback when icd9 has no match. Uses two rows whose
+    icd9/icd10 codes map to *different* diagnoses so the default is actually exercised, not
+    just accepted by coincidence."""
+    dx_all = pd.DataFrame(
+        [
+            _dx_row("p1", icd9="571.2", icd10="K76.0"),  # icd9->Cirrhosis, icd10->NAFLD
+        ]
+    )
+    dx_incident = dx_all_to_first_fast(dx_all, id_col="anon_id")
+    assert dx_incident["diagnosis_name"].iloc[0] == "Cirrhosis"
+
+
 def test_earliest_date_per_patient_diagnosis():
     dx_all = pd.DataFrame(
         [

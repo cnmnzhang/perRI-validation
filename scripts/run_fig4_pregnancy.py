@@ -15,12 +15,12 @@ rates at trimester 1.
 Required inputs: a pregnancy_labs table (anon_id, ts, test_code,
 result_value) and a pregnancy_outcomes_and_demogs table (anon_id, delivery_date,
 gestational_age, rbc_tf, pih) -- see README.md. Setpoints are
-computed via perri_validation.utils.setpoints.compute_sp_df (perri's isolation
+computed via utils.setpoints.compute_sp_df (perri's isolation
 filter already matches the real pipeline's pre-pregnancy isolation logic
 exactly), not a pregnancy-specific model.
 
 Run:
-    python -m perri_validation.scripts.run_fig4_pregnancy --input-dir data --output-dir outputs/fig4_pregnancy
+    python -m scripts.run_fig4_pregnancy --input-dir data --output-dir outputs/fig4_pregnancy
 """
 
 from __future__ import annotations

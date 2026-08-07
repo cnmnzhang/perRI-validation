@@ -17,12 +17,12 @@ lab_threshold outcome check and never passed to compute_sp_df, so it's not fit h
 
 Required inputs: `tests.csv` (anon_id, ts, test_code, result_value, sex) covering all 43
 pipeline markers -- see README.md. Reads its markers from the per-marker
-split built by `perri_validation.scripts.run_tests_by_marker` -- run that first (or use
+split built by `scripts.run_tests_by_marker` -- run that first (or use
 `run_all`, which sequences it automatically); raises a clear FileNotFoundError with the
 command to run if it hasn't been built yet.
 
 Run:
-    python -m perri_validation.scripts.run_setpoints_by_marker --input-dir data --output-dir outputs/setpoints_by_marker
+    python -m scripts.run_setpoints_by_marker --input-dir data --output-dir outputs/setpoints_by_marker
 """
 
 from __future__ import annotations

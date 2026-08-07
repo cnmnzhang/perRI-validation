@@ -38,6 +38,16 @@ One row per patient per test over time, covering every marker needed. Analysis f
 | COAG | PROINR, PROPAT |
 | MISC | A1C, FER, HSCRP, LD, MG, P, TSH, VITDT |
 
+```bash
+full_marker_list = [
+    'HB', 'HCT', 'MCH', 'MCHC', 'MCV', 'PLT', 'RBC', 'RDWCV', 'WBC',
+    'BUN', 'CA', 'CL', 'CO2', 'CRE', 'GLU', 'IGAP', 'K', 'NA',
+    'LYMPH', 'MONOC', 'TNEUT', 'ALB', 'ALK', 'ALT', 'AST', 'BIL',
+    'BILD', 'TP', 'CHOL', 'HDL', 'LDL', 'NONHDL', 'TRIG', 'PROINR',
+    'PROPAT', 'A1C', 'FER', 'HSCRP', 'LD', 'MG', 'P', 'TSH', 'VITDT', 'T4FR'
+]
+```
+
 ### Dx
 One row per patient per date per ICD9/ICD10 code, where multiple codes can map to the same diagnosis. Usually from EHR, both are filled, but processing scripts handles if one is null. These scripts also handle duplicates.
 
@@ -59,27 +69,27 @@ swimmer panel's cohort, laboratory, and infusion source tables are retained unde
 pip install -r requirements.txt
 
 # Run everything in the necessary and preferred order:
-python -m perri_validation.run_all --analysis all
+python -m run_all --analysis all
 
 # Or one analysis at a time
 #### dependencies
-python -m perri_validation.scripts.run_tests_by_marker
-python -m perri_validation.scripts.run_setpoints_by_marker
-python -m perri_validation.scripts.run_dx_incident
+python -m scripts.run_tests_by_marker
+python -m scripts.run_setpoints_by_marker
+python -m scripts.run_dx_incident
 #### Analysis
-python -m perri_validation.scripts.run_fig3_hazard
-python -m perri_validation.scripts.run_fig3_dx
-python -m perri_validation.scripts.run_fig4_dx_cases
-python -m perri_validation.scripts.run_fig5_iron_infusion
+python -m scripts.run_fig3_hazard
+python -m scripts.run_fig3_dx
+python -m scripts.run_fig4_dx_cases
+python -m scripts.run_fig5_iron_infusion
 #### Analysis with no dependencies
-python -m perri_validation.scripts.run_fig4_pregnancy
+python -m scripts.run_fig4_pregnancy
 
 # rerun marker dependencies for a single marker
-python -m perri_validation.scripts.run_tests_by_marker --marker TSH
-python -m perri_validation.scripts.run_setpoints_by_marker --marker TSH
+python -m scripts.run_tests_by_marker --marker TSH
+python -m scripts.run_setpoints_by_marker --marker TSH
 
 # rerun analysis, but won't recompute dependencies (dx_incident, sp_df)
-python -m perri_validation.scripts.run_fig3_dx --force
+python -m scripts.run_fig3_dx --force
 ```
 
 Pass `--force` to any script to recompute (ignoring any existing cache for that run). Recomputing for an analysis script will not recompute dependencies. 
@@ -123,3 +133,8 @@ own numba JIT warmup for perri's `@njit`-compiled `bayesian()` fit on first call
 - Used in tests_by_marker splitting. Once the master is read (~13 minutes or a 1.75GB gzipped file), 
 writing each marker's split CSV is independent I/O-bound work, so it runs across a `ThreadPoolExecutor` (up to N_JOBS workers) instead of one file at a time.
 - Used in setpoint computation so `compute_sp_df` to fit patients in parallel. 
+
+## Side-by-side Validation
+```bash
+python -m scripts.diagnostics.validate_fig3_hazard
+```

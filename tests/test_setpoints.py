@@ -200,6 +200,20 @@ def test_compute_sp_df_canonical_writes_fingerprint_free_cache_name():
     assert (setpoints_module.CACHE_DIR / f"sp_df_HB_full_m{DEFAULT_MIN_MEASUREMENTS}.csv").exists()
 
 
+def test_log_transform_marker_gets_distinct_log_suffixed_cache_name():
+    """A marker in utils.log_transform_markers.LOG_TRANSFORM_MARKERS (e.g. GLU) caches
+    under a `_log`-suffixed filename, distinct from the non-log-transform cache name a
+    plain test_code would use -- so toggling a marker in/out of that set (e.g. while
+    investigating whether it should be log-transformed, as happened for TSH) produces two
+    separate cache files instead of one silently overwriting the other."""
+    tests_df = _isolated_series("p1", "F", value=100.0).assign(test_code="GLU")
+    compute_sp_df(tests_df, test_code="GLU", force=True, canonical=True)
+
+    assert is_fitted_canonical("GLU") is True
+    assert (setpoints_module.CACHE_DIR / f"sp_df_GLU_full_m{DEFAULT_MIN_MEASUREMENTS}_log.csv").exists()
+    assert not (setpoints_module.CACHE_DIR / f"sp_df_GLU_full_m{DEFAULT_MIN_MEASUREMENTS}.csv").exists()
+
+
 def test_compute_sp_df_canonical_hit_never_touches_tests_df():
     tests_df = _isolated_series("p1", "F")
     compute_sp_df(tests_df, test_code="HB", force=True, canonical=True)

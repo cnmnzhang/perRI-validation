@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from utils.visuals_fig3 import battery_tests_in_ioi_order, fig3baseline_on_axes
+from utils.visuals_fig3 import battery_tests_in_ioi_order, fig3baseline_on_axes, fig3km
 
 
 def test_battery_tests_in_ioi_order_orders_highest_ioi_first():
@@ -53,5 +53,53 @@ def test_fig3baseline_on_axes_retains_marker_missing_from_ioi_order():
         result = fig3baseline_on_axes(axes, hr_df, ioi_order=["HB"], variables=("mu",))
         assert not result["test_code"].isna().any()
         assert "ALB" in set(result["test_code"])
+    finally:
+        plt.close(fig)
+
+
+def test_fig3km_facets_follow_combined_order_descending_not_alphabetical():
+    """Regression: fig3km used to sort facets alphabetically-descending on "diagnosis"
+    (sort_values(["diagnosis", ...], ascending=[False, ...])), silently defeating
+    COMBINED_ORDER -- run_fig3_dx.py's own comment already documented COMBINED_ORDER as the
+    intended display order (descending, by explicit request). Picks 3 diagnoses (from
+    COMBINED_ORDER: Cirrhosis, Neuropathy, Heart failure) whose plain alphabetical-descending
+    order ("Neuropathy", "Heart failure", "Cirrhosis") differs from their descending-
+    COMBINED_ORDER order ("Heart failure", "Neuropathy", "Cirrhosis") -- confirming the fix
+    actually follows COMBINED_ORDER, not just accepting a coincidental match."""
+    km_data = pd.DataFrame(
+        [
+            {"diagnosis": dx, "group": "< 25%", "timeline": t, "survival": 1.0, "setpoint_type": "HB", "count": 100}
+            for dx in ["Neuropathy", "Heart failure", "Cirrhosis"]
+            for t in [0, 1]
+        ]
+    )
+    fig = fig3km(km_data)
+    try:
+        titles = [ax.get_title() for ax in fig.axes if ax.get_title()]
+        diagnoses_in_order = [t.split("\n")[0] for t in titles]
+        assert diagnoses_in_order == ["Heart failure", "Neuropathy", "Cirrhosis"]
+    finally:
+        plt.close(fig)
+
+
+def test_fig3km_retains_diagnosis_missing_from_combined_order():
+    """A diagnosis present in the data but absent from COMBINED_ORDER must still render
+    last (after the ordered ones), not be dropped -- same convention as
+    battery_tests_in_ioi_order's fallback. Since the sort is descending, "last" means the
+    fallback diagnosis must be placed *first* in the underlying category list (descending
+    walks the category list back-to-front) -- this test would catch a naive re-introduction
+    of "categories = ordered + fallback" the way an ascending sort would want it."""
+    km_data = pd.DataFrame(
+        [
+            {"diagnosis": dx, "group": "< 25%", "timeline": t, "survival": 1.0, "setpoint_type": "HB", "count": 100}
+            for dx in ["Cirrhosis", "Some Unlisted Diagnosis"]
+            for t in [0, 1]
+        ]
+    )
+    fig = fig3km(km_data)
+    try:
+        titles = [ax.get_title() for ax in fig.axes if ax.get_title()]
+        diagnoses_in_order = [t.split("\n")[0] for t in titles]
+        assert diagnoses_in_order == ["Cirrhosis", "Some Unlisted Diagnosis"]
     finally:
         plt.close(fig)

@@ -8,7 +8,7 @@ printed during it -- including lines from deep inside `utils/` -- gets a
 single consistent "[analysis_name] " prefix. That's enough to tell, at a
 glance, which of dx_incident / fig3_dx / fig5_iron_infusion / fig4_dx_cases
 produced a given line when running
-`python -m perri_validation.run_all --analysis all`.
+`python -m run_all --analysis all`.
 """
 
 from __future__ import annotations

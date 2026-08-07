@@ -126,6 +126,9 @@ MODEL2COLOR = {
     "population": "#9E9E9E",
     "moving_average": "#84DCC6",
     "greedy": "#F2B5D4",
+    # scripts/diagnostics/validate_fig3_hazard.py's UWM-vs-validation comparison plot
+    "UWM": "#3B5CCB",
+    "validation": "#D9534F",
 }
 
 COLOR_MAP = {model: {"line": color, "fill": _to_rgba(color, 0.2)} for model, color in MODEL2COLOR.items()}

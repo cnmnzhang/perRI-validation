@@ -10,7 +10,7 @@ analysis script that happens to touch it first.
 Required inputs: `tests.csv` or `tests.csv.gz` -- see README.md.
 
 Run:
-    python -m perri_validation.scripts.run_tests_by_marker --input-dir data --output-dir outputs/tests_by_marker
+    python -m scripts.run_tests_by_marker --input-dir data --output-dir outputs/tests_by_marker
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def build_tests_by_marker(input_dir: Union[str, Path], force: bool = False, mark
 
     if markers is not None:
         if not sentinel_path.exists():
-            raise FileNotFoundError(f"Expected the full split to already exist at {marker_dir} before refreshing individual markers {markers} -- run the full split first: python -m perri_validation.scripts.run_tests_by_marker --input-dir {input_dir}")
+            raise FileNotFoundError(f"Expected the full split to already exist at {marker_dir} before refreshing individual markers {markers} -- run the full split first: python -m scripts.run_tests_by_marker --input-dir {input_dir}")
         print(f"[io] tests_by_marker/ refreshing {len(markers)} marker(s): {', '.join(markers)}...")
         tests_df = load_tests_csv(resolve_tests_csv_path(input_dir))
         groups = [(test_code, tests_df[tests_df[TEST_CODE_COL] == test_code]) for test_code in markers]

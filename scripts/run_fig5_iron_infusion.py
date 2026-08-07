@@ -11,7 +11,7 @@ recorded in manifest.json (as an "error" key) rather than left as an uncaught tr
 matching how run_all.py and the other analyses report failure.
 
 Reads HB via the per-marker split built by
-`perri_validation.scripts.run_tests_by_marker` -- run that first (or use `run_all`,
+`scripts.run_tests_by_marker` -- run that first (or use `run_all`,
 which sequences it automatically); raises a clear FileNotFoundError with the command
 to run if it hasn't been built yet -- unless `iv_iron_bundle/` is already fully
 cached (see below), in which case the split is never even read. The course/cohort-
@@ -38,7 +38,7 @@ plot_mosaic() -- delete output_dir/iv_iron_bundle/, or pass --force, after
 tests.csv/iron_mar.csv change.
 
 Run:
-    python -m perri_validation.scripts.run_fig5_iron_infusion --input-dir data --output-dir outputs/fig5_iron_infusion
+    python -m scripts.run_fig5_iron_infusion --input-dir data --output-dir outputs/fig5_iron_infusion
 """
 
 from __future__ import annotations
@@ -92,7 +92,6 @@ from utils.visuals_fig5 import (  # noqa: E402
     fig5swimmer_on_ax,
     fig5trajectory_on_axes,
 )
-
 IRON_MAR_FILE = "iron_mar.csv"
 
 # The 5 DataFrames build_iv_iron_bundle() produces, each cached as its own inspectable CSV

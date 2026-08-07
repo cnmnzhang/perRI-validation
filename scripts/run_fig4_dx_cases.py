@@ -9,16 +9,16 @@ heatmap), using utils/visuals_fig4.py's rendering functions
 directly (not a simplified re-implementation).
 
 Required inputs: `tests.csv` (CRE, WBC, TSH, T4FR rows), a Demographics table,
-and the *derived* Dx table produced by `perri_validation.scripts.run_dx_incident` (`dx_incident.csv`)
-— see README.md. Run dx_incident first: `python -m perri_validation.scripts.run_dx_incident`.
+and the *derived* Dx table produced by `scripts.run_dx_incident` (`dx_incident.csv`)
+— see README.md. Run dx_incident first: `python -m scripts.run_dx_incident`.
 This script will raise a clear error naming the expected path if that file
 isn't there yet. Reads its markers from the per-marker split built by
-`perri_validation.scripts.run_tests_by_marker` -- run that first too (or use
+`scripts.run_tests_by_marker` -- run that first too (or use
 `run_all`, which sequences both automatically); raises a clear FileNotFoundError
 with the command to run if it hasn't been built yet.
 
 Run:
-    python -m perri_validation.scripts.run_fig4_dx_cases --input-dir data --output-dir outputs/fig4_dx_cases
+    python -m scripts.run_fig4_dx_cases --input-dir data --output-dir outputs/fig4_dx_cases
 """
 
 from __future__ import annotations
@@ -72,7 +72,6 @@ from utils.visuals_fig4 import (  # noqa: E402
     fig4km_exclusive_on_ax,
     plot_single_patient_history_on_ax,
 )
-
 DEMOGRAPHICS_FILE = "demographics.csv"
 
 def _outcome_markers(outcome_cfg) -> list[str]:
@@ -372,6 +371,7 @@ def run(*, input_dir: Path, output_dir: Path, dx_incident_path: Path = None, out
         "outputs": [mosaic_path.name, forest_ors_path.name] + [f"fig4_dx_cases_{name}_cohort.csv" for name in results] + case_outputs + ["manifest.json"],
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n")
+
     return manifest
 
 
@@ -379,7 +379,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run fig4 dx cases (aki, leukemia, hypothyroidism).")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig4_dx_cases")
-    parser.add_argument("--dx-incident-path", type=Path, default=None, help="Path to dx_incident.csv from `perri_validation.scripts.run_dx_incident`. Default: outputs/dx_incident/dx_incident.csv")
+    parser.add_argument("--dx-incident-path", type=Path, default=None, help="Path to dx_incident.csv from `scripts.run_dx_incident`. Default: outputs/dx_incident/dx_incident.csv")
     parser.add_argument("--outcome", action="append", dest="outcomes", choices=list(OUTCOME_REGISTRY.keys()), help="Restrict to one outcome (repeatable). Default: all.")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)

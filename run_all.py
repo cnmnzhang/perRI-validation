@@ -3,8 +3,8 @@
 Run in a preferred order, since some analyses depend on others (e.g., fig3_dx and fig4_dx_cases depend on dx_incident).
 
 Run:
-    python -m perri_validation.run_all --analysis all
-    python -m perri_validation.run_all --analysis dx_incident
+    python -m run_all --analysis all
+    python -m run_all --analysis dx_incident
 """
 
 from __future__ import annotations

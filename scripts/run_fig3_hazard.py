@@ -11,7 +11,7 @@ all 43 pipeline markers and a Demographics table (anon_id, sex, birth_date,
 death_ts). Marker display order comes from constants/marker_lab_config.py. 
 
 Run:
-    python -m perri_validation.scripts.run_fig3_hazard --input-dir data --output-dir outputs/fig3_hazard
+    python -m scripts.run_fig3_hazard --input-dir data --output-dir outputs/fig3_hazard
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ from utils.setpoints import fit_markers_lazy  # noqa: E402
 from utils.clinical.coxph import run_cox_summary  # noqa: E402
 from utils.clinical.get import attach_ref_intervals, compute_within_normal_mask  # noqa: E402
 from utils.clinical.run_clinical import get_one_setpoint  # noqa: E402
+from utils.log_transform_markers import is_log_transform  # noqa: E402
 from constants.marker_config import MARKER_IOI_ORDER, TESTCODES_LIST  # noqa: E402
-from constants.runtime import CV_COL, ID_COL, MAX_FIT_DATE, MU, SEX_COL, TEST_CODE_COL  # noqa: E402
+from constants.runtime import CV_COL, ID_COL, INDEX_COL, MAX_FIT_DATE, MODEL_COL, MU, SEX_COL, SIGMA, TEST_CODE_COL, TS_COL  # noqa: E402
 from utils.visuals_fig3 import fig3baseline, fig3hr  # noqa: E402
 
 DEMOGRAPHICS_FILE = "demographics.csv"
@@ -47,6 +48,14 @@ MIN_ISOLATED_PANEL_A = 5
 BASELINE_INDICES = [1, 2, 3, 4, 5]
 VARIABLES = (MU, CV_COL)
 
+# bayesian-setpoint-inference's config/opt_config.py:MIN_MEASUREMENTS -- the bar
+# filter_sp_df's "Minimum Measurements Filter" enforces on the full setpoint sequence
+# before any per-baseline-index selection. Distinct from (and stricter than)
+# constants.runtime.DEFAULT_MIN_MEASUREMENTS (3), which only gates whether perri fits a
+# patient at all (utils/setpoints.py) -- a patient with 3-4 isolated measurements passes
+# that bar and gets fit, but must still be excluded here to match the live pipeline.
+MIN_MEASUREMENTS_FOR_FILTER = 5
+
 
 def _build_setpoints_with_demog(sp_df: pd.DataFrame, demog_df: pd.DataFrame) -> pd.DataFrame:
     return sp_df.merge(demog_df[demog_df[SEX_COL].isin(["F", "M"])], on=[ID_COL, SEX_COL], how="left")
@@ -55,6 +64,54 @@ def _build_setpoints_with_demog(sp_df: pd.DataFrame, demog_df: pd.DataFrame) -> 
 def _apply_normal_filter(sp_df: pd.DataFrame) -> pd.DataFrame:
     sp_with_ri = attach_ref_intervals(sp_df)
     return sp_with_ri[compute_within_normal_mask(sp_with_ri)].copy()
+
+
+def _filter_invalid_cv_patients(sp_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop every (patient, test_code, model)'s entire setpoint sequence if any of its
+    measurements from the 4th isolated point onward (index >= 3) has an "invalid" cv --
+    vendored from bayesian-setpoint-inference's utils/setpoints_runner.py:filter_sp_df's
+    "CV Filter" step (the last of its three steps -- see _filter_sp_df).
+
+    "Invalid" differs by whether the marker is fit in log-space (utils/log_transform_markers):
+    log-space markers back-transform to cv = sqrt(exp(sigma_log^2) - 1), which legitimately
+    exceeds 1 for a highly variable patient, so only cv < 0 (a numerically degenerate case) is
+    rejected for them; non-log markers keep the standard cv in [0, 1] guard.
+    """
+    df = sp_df.copy()
+    if CV_COL not in df.columns:
+        df[CV_COL] = df[SIGMA] / df[MU]
+    is_log = df[TEST_CODE_COL].map(is_log_transform)
+    invalid_mask = (df[INDEX_COL] >= 3) & ((df[CV_COL] < 0) | (~is_log & (df[CV_COL] > 1)))
+    invalid_combos = df.loc[invalid_mask, [ID_COL, TEST_CODE_COL, MODEL_COL]].drop_duplicates()
+    if invalid_combos.empty:
+        return sp_df
+    merged = sp_df.merge(invalid_combos.assign(_invalid=True), on=[ID_COL, TEST_CODE_COL, MODEL_COL], how="left")
+    return merged[merged["_invalid"].isna()].drop(columns=["_invalid"])
+
+
+def _filter_sp_df(sp_df: pd.DataFrame) -> pd.DataFrame:
+    """Vendored from bayesian-setpoint-inference's utils/setpoints_runner.py:filter_sp_df,
+    applied to fig3's setpoints before any per-patient baseline-index selection
+    (get_one_setpoint), matching where and in what order the live pipeline applies it:
+
+    1. Date filter: drop measurements at/after MAX_FIT_DATE.
+    2. Minimum measurements filter: drop a (patient, test_code, model)'s entire sequence
+       if it has fewer than MIN_MEASUREMENTS_FOR_FILTER rows *after* the date filter above.
+       This is the one that actually explains most of fig3b's low-baseline-index drift: a
+       patient with only 3-4 isolated measurements passes compute_sp_df's looser fitting bar
+       (constants.runtime.DEFAULT_MIN_MEASUREMENTS = 3) and gets fit, contributing rows at
+       low index values (1, 2) -- but the live pipeline requires 5 before considering them
+       for fig3 at all, at any baseline index. Without this step, those extra patients
+       inflate every low-index cohort (baseline_index=1 was ~5.7x ground truth's n) while
+       naturally vanishing by index 4-5, since they don't have enough measurements to reach
+       there -- exactly the "divergence shrinks as baseline_index grows" pattern seen in
+       data/UWM/ comparisons.
+    3. CV filter (_filter_invalid_cv_patients).
+    """
+    dated = sp_df[sp_df[TS_COL] < pd.Timestamp(MAX_FIT_DATE)]
+    counts = dated.groupby([ID_COL, TEST_CODE_COL, MODEL_COL])[ID_COL].transform("size")
+    met_min = dated[counts >= MIN_MEASUREMENTS_FOR_FILTER]
+    return _filter_invalid_cv_patients(met_min)
 
 
 def build_hr_by_model(sp_df_demog: pd.DataFrame) -> pd.DataFrame:
@@ -155,7 +212,8 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False) -> dict:
             with timed_step("fit_setpoints", f"Fitting setpoints for {len(TESTCODES_LIST)} markers"):
                 sp_df = fit_markers_lazy(input_dir, TESTCODES_LIST, force=False, label="fig3_hazard")
             sp_df_holder["sp_df"] = sp_df
-            sp_df_holder["sp_df_demog"] = _build_setpoints_with_demog(sp_df, demog_df)
+            sp_df_demog = _build_setpoints_with_demog(sp_df, demog_df)
+            sp_df_holder["sp_df_demog"] = _filter_sp_df(sp_df_demog)
         return sp_df_holder["sp_df_demog"]
 
     def _compute_hr_by_model() -> pd.DataFrame:

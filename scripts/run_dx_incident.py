@@ -4,13 +4,13 @@ Collapses row-level ICD9/ICD10 diagnosis events (one row per diagnosis per
 visit) into dx_incident.csv -- one row per (patient, diagnosis) with the
 earliest ("incident") date that diagnosis appears. fig3_dx and fig4_dx_cases
 both read this output rather than re-deriving it (run dx_incident first:
-python -m perri_validation.scripts.run_dx_incident).
+python -m scripts.run_dx_incident).
 
 Required inputs: a Dx table (anon_id, icd9, icd10, date) -- see
 README.md.
 
 Run:
-    python -m perri_validation.scripts.run_dx_incident --input-dir data --output-dir outputs/dx_incident
+    python -m scripts.run_dx_incident --input-dir data --output-dir outputs/dx_incident
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 Two marker-outcome pairs (PAIR_SPECS): WBC -> pih (pregnancy-induced
 hypertension) and HCT -> received_tf (received a blood transfusion). For each
 pair: pre-conception isolated labs are fit via
-perri_validation.utils.setpoints.compute_sp_df, the last pre-conception
+utils.setpoints.compute_sp_df, the last pre-conception
 estimate is carried forward as "the setpoint," and in-pregnancy labs are
 joined back to it to compute gestational week/trimester and PerRI/PopRI flags
 via add_oo.

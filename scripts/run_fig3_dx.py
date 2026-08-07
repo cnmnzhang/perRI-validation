@@ -1,6 +1,6 @@
 """Fig3 dx use case: fig3's non-cancer Kaplan-Meier panel.
 
-Reads the derived Dx table produced by `perri_validation.scripts.run_dx_incident`
+Reads the derived Dx table produced by `scripts.run_dx_incident`
 (`dx_incident.csv`) rather than re-deriving it -- run dx_incident first. This
 script will raise a clear error naming the expected path if that file isn't
 there yet -- unless `fig3_km_data.csv` is already cached in `output_dir` (see
@@ -18,13 +18,13 @@ Required inputs: `tests.csv` (anon_id, ts, test_code, result_value, sex) coverin
 the 8 fig3-KM markers (HB, TNEUT, ALB, ALT, MCV, P, GLU, K), and a Demographics
 table (anon_id, sex, birth_date, death_ts) -- see README.md. Reads
 its markers from the per-marker split built by
-`perri_validation.scripts.run_tests_by_marker` -- run that first (or use `run_all`,
+`scripts.run_tests_by_marker` -- run that first (or use `run_all`,
 which sequences it automatically); raises a clear FileNotFoundError with the command
 to run if it hasn't been built yet -- unless `fig3_km_data.csv` is already cached
 (see below), in which case the split is never even read.
 
 Run:
-    python -m perri_validation.scripts.run_fig3_dx --input-dir data --output-dir outputs/fig3_dx
+    python -m scripts.run_fig3_dx --input-dir data --output-dir outputs/fig3_dx
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run fig3's dx-anchored Kaplan-Meier panel.")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig3_dx")
-    parser.add_argument("--dx_incident_path", type=Path, default=None, help="Path to dx_incident.csv from `perri_validation.scripts.run_dx_incident`. Default: outputs/dx_incident/dx_incident.csv")
+    parser.add_argument("--dx_incident_path", type=Path, default=None, help="Path to dx_incident.csv from `scripts.run_dx_incident`. Default: outputs/dx_incident/dx_incident.csv")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 
