@@ -15,10 +15,10 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.ticker import MaxNLocator
 
-from perri_validation.vendor.clinical.pregnancy import PairSpec, PREDICTOR_LABELS, TRIMESTER_LABELS
-from perri_validation.vendor.constants.fig_config import FIG4_HEATMAP_ANNOT_FONTSIZE, FIG4_LEGEND_FONTSIZE, FIG4_TITLE_FONTSIZE, MODEL2COLOR, QUANTILE_BAND_INNER_ALPHA, QUANTILE_BAND_OUTER_ALPHA, REF_LINE_STYLE
-from perri_validation.vendor.constants.marker_config import TESTCODE_DISPLAY
-from perri_validation.vendor.constants.runtime import DELTA_COL, MEASUREMENT_COL
+from utils.clinical.pregnancy import PairSpec, PREDICTOR_LABELS, TRIMESTER_LABELS
+from constants.fig_config import FIG4_HEATMAP_ANNOT_FONTSIZE, FIG4_LEGEND_FONTSIZE, FIG4_TITLE_FONTSIZE, MODEL2COLOR, QUANTILE_BAND_INNER_ALPHA, QUANTILE_BAND_OUTER_ALPHA, REF_LINE_STYLE
+from constants.marker_config import TESTCODE_DISPLAY
+from constants.runtime import DELTA_COL, MEASUREMENT_COL
 
 
 def plot_task1_on_ax(ax: plt.Axes, summary_df: pd.DataFrame, pair: PairSpec, setpoint_values: pd.Series, legend: bool = False, labelx: bool = False) -> None:

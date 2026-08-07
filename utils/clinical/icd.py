@@ -73,7 +73,7 @@ def dx_all_to_first_fast(
     icd9_col: str = "icd9",
     icd10_col: str = "icd10",
     ts_col: str = "diagnosis_ts",
-    prefer: str = "icd10",  # or "icd10"
+    prefer: str = "icd9",  
 ) -> pd.DataFrame:
     """
     Fast conversion of all diagnoses -> first occurrence per (patient, diagnosis_name).

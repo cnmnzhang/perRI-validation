@@ -11,6 +11,7 @@ import seaborn as sns
 
 from utils.clinical.battery import add_battery_column, battery_for_test_code
 from constants.fig_config import A4_WIDTH, FONT_SIZE_PANEL_TITLE, FONT_SIZE_TICK_LABEL, MODEL2COLOR, REF_LINE_STYLE
+from constants.icd_config import COMBINED_ORDER
 from constants.marker_config import BATTERY2TESTCODE, TESTCODE_DISPLAY
 from constants.runtime import CV_COL, MU, TEST_CODE_COL
 from utils.visuals_shared import FIG3_CAPSIZE, FIG3_ERROR_BAR_MARKERSIZE, OFFSET, _snap_yticks_to_ylim, format_battery_label, save_fig_as_svg
@@ -58,6 +59,15 @@ def fig3km(
         plot_df["N"] = plot_df["N"].fillna(0).astype(int)
         plot_df["facet_title"] = plot_df["diagnosis"].astype(str) + " (" + plot_df["setpoint_type_display"].astype(str) + ")\nN=" + plot_df["N"].astype(str)
 
+    # Facet order follows COMBINED_ORDER (the curated diagnosis order run_fig3_dx.py's own
+    # comment already documents as intended), descending, not alphabetical -- diagnoses
+    # present but not in COMBINED_ORDER still fall back to the end (last-displayed), not
+    # dropped. The sort below is descending, so "the end" is the *first* category in the
+    # list (descending walks the category list back-to-front) -- extras go first in
+    # diagnosis_order, not appended after, to land last visually.
+    present_diagnoses = plot_df["diagnosis"].dropna().unique().tolist()
+    diagnosis_order = sorted(set(present_diagnoses) - set(COMBINED_ORDER)) + [d for d in COMBINED_ORDER if d in present_diagnoses]
+    plot_df["diagnosis"] = pd.Categorical(plot_df["diagnosis"], categories=diagnosis_order, ordered=True)
     plot_df.sort_values(["diagnosis", "group", "timeline"], ascending=[False, True, True], inplace=True)
 
     palette = {

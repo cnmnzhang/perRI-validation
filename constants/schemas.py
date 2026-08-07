@@ -19,7 +19,7 @@ class TableSchema:
 TESTS_SCHEMA = TableSchema(
     name="Tests",
     required_columns=(ID_COL, TS_COL, TEST_CODE_COL, MEASUREMENT_COL, SEX_COL),
-    notes="Non-isolated (raw) lab results, one row per measurement.",
+    notes="Non-isolated lab results, one row per measurement.",
 )
 
 DX_SCHEMA = TableSchema(
@@ -39,7 +39,7 @@ IRON_MAR_SCHEMA = TableSchema(
     required_columns=(ID_COL, TS_COL),
     notes="Medication administration record rows for iron formulations -- must already be "
     "pre-filtered to the intended route and formulation (IV, iron sucrose) before being "
-    "provided; this repo does not filter on route/desc itself (no such columns are required).",
+    "provided.",
 )
 
 PREGNANCY_LABS_SCHEMA = TableSchema(

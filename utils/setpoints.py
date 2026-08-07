@@ -5,6 +5,13 @@ from this repo's own pop_ri (constants/marker_config.py), not taken
 unchanged from perri's bundled hyperparameters -- see _params_override(). Only
 log_lambda_ still comes from perri's tuned defaults; overriding it needs a
 perri-level change (see README.md's "Adapting to a different population").
+
+A handful of markers (utils/hp_sex_selector.SEX_STRATIFIED_MARKERS) are fit
+with sex-specific ("F"/"M") hyperparameters instead of the pooled "ALL" row,
+matching the live pipeline -- see compute_sp_df's _compute().
+
+A handful of markers (utils/log_transform_markers.LOG_TRANSFORM_MARKERS) are fit
+in log-space instead of raw units -- see _fit_batch_for_group().
 """
 
 import math
@@ -19,6 +26,8 @@ from constants.runtime import DEFAULT_MIN_MEASUREMENTS, ID_COL, INDEX_COL, MEASU
 from utils.cache import cache_or_compute as _cache_or_compute
 from utils.cache import hash_dataframe
 from utils.clinical.get import popRI
+from utils.hp_sex_selector import is_sex_stratified
+from utils.log_transform_markers import is_log_transform
 from perri import fit_batch, get_default_params
 
 SP_DF_COLUMNS = [ID_COL, TEST_CODE_COL, MODEL_COL, TS_COL, MU, SIGMA, MEASUREMENT_COL, SEX_COL, INDEX_COL]
@@ -79,7 +88,7 @@ def _compute_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
     return float(np.percentile(all_values, _LOWER_PCTL)), float(np.percentile(all_values, _UPPER_PCTL))
 
 
-def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL") -> dict:
+def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_space: bool = False) -> dict:
     """Override one marker's grid parameters using the editable ``pop_ri`` read
     from ``constants/marker_lab_config.py``; retain perri's tuned ``log_lambda_``.
 
@@ -89,16 +98,61 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL") -> dict
     measurements (see _compute_popri_patch) -- falling back to perri's bundled
     min_mu/max_mu/min_sigma/max_sigma unchanged only if that population has no
     isolated data to compute a patch from.
+
+    log_space=True (for utils.log_transform_markers.LOG_TRANSFORM_MARKERS) log-
+    transforms the resolved (low, high) bounds before deriving the grid, matching
+    the live pipeline's utils/get.py:get_log_model_constants -- clipped at 1e-6
+    the same way it clips there, since pop_ri lower bounds are sometimes exactly 0.
     """
     params = get_default_params(test_code, sex=sex)
     low, high = popRI(sex=sex, test_code=test_code)
-    if math.isfinite(low) and math.isfinite(high):
-        params.update(_grid_bounds_from_pop_ri(low, high))
-    else:
-        patch = _compute_popri_patch(df)
-        if patch is not None:
-            params.update(_grid_bounds_from_pop_ri(*patch))
+    bounds = (low, high) if math.isfinite(low) and math.isfinite(high) else _compute_popri_patch(df)
+    if bounds is None:
+        return params
+    low, high = bounds
+    if log_space:
+        low, high = math.log(max(low, 1e-6)), math.log(max(high, 1e-6))
+    params.update(_grid_bounds_from_pop_ri(low, high))
     return params
+
+
+def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_measurements: int, n_jobs: int) -> pd.DataFrame:
+    """fit_batch for one (test_code, sex_label) group, transparently handling
+    log-space fitting for utils.log_transform_markers.LOG_TRANSFORM_MARKERS.
+
+    Mirrors the live pipeline's utils/setpoints_runner.py:run_patient_from_dict:
+    measurements are log-transformed before fitting (clipped at 1e-6, matching
+    _params_override's grid-bound clipping), and mu/sigma are back-transformed via
+    the exact log-normal formula after fitting -- mu_raw = exp(mu_log), sigma_raw =
+    mu_raw * sqrt(exp(sigma_log^2) - 1). perri's fit_batch echoes back whatever
+    `value` it was fit on, so the fitted `value` column (log-space) is swapped back
+    for the original raw measurement per (patient, timestamp) -- the live pipeline's
+    sp_df always stores raw-unit measurements regardless of which space mu/sigma
+    were fit in.
+    """
+    log_space = is_log_transform(test_code)
+    fit_df = df
+    if log_space:
+        fit_df = df.copy()
+        fit_df[MEASUREMENT_COL] = np.log(np.clip(fit_df[MEASUREMENT_COL].to_numpy(), 1e-6, None))
+    fitted = fit_batch(
+        fit_df,
+        value_col=MEASUREMENT_COL,
+        timestamp_col=TS_COL,
+        patient_id_col=ID_COL,
+        test_code=test_code,
+        sex=sex_label,
+        params=_params_override(test_code, df, sex=sex_label, log_space=log_space),
+        min_measurements=min_measurements,
+        n_jobs=n_jobs,
+    )
+    if fitted.empty or not log_space:
+        return fitted
+    raw_lookup = df.rename(columns={ID_COL: "patient_id", TS_COL: "timestamp", MEASUREMENT_COL: "value"})[["patient_id", "timestamp", "value"]]
+    fitted = fitted.drop(columns=["value"]).merge(raw_lookup, on=["patient_id", "timestamp"], how="left")
+    fitted["sigma"] = np.exp(fitted["mu"]) * np.sqrt(np.exp(fitted["sigma"] ** 2) - 1)
+    fitted["mu"] = np.exp(fitted["mu"])
+    return fitted
 
 
 def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_measurements: int) -> str:
@@ -116,9 +170,15 @@ def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_
     full-population HB) get genuinely different cache files instead of fighting over one
     `sp_df_HB.csv`, which previously caused real cache thrashing (and, worse, real cached
     results getting overwritten by unrelated smoke-test runs sharing the same path).
+
+    Also embeds a `_log` suffix when utils.log_transform_markers.is_log_transform(test_code)
+    -- so flipping a marker in/out of LOG_TRANSFORM_MARKERS (e.g. while investigating whether
+    it should be log-transformed) produces a distinct cache file instead of silently
+    overwriting the other variant's fit, letting both be kept around and compared.
     """
     population_hash = hash_dataframe(df_filtered_to_test_code)[:16]
-    return f"sp_df_{test_code}_{population_hash}_m{min_measurements}.csv"
+    log_suffix = "_log" if is_log_transform(test_code) else ""
+    return f"sp_df_{test_code}_{population_hash}_m{min_measurements}{log_suffix}.csv"
 
 
 def is_fitted(tests_df: pd.DataFrame, test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
@@ -140,8 +200,12 @@ def _canonical_cache_name(test_code: str, min_measurements: int) -> str:
     The point: checking is_fitted_canonical needs only test_code, not a loaded/hashed
     DataFrame, so a caller fitting many markers (fit_markers_lazy) can skip loading a
     marker's multi-hundred-MB CSV split entirely when it's already fitted.
+
+    Also embeds a `_log` suffix when is_log_transform(test_code) -- see _cache_name_for's
+    docstring for why.
     """
-    return f"sp_df_{test_code}_full_m{min_measurements}.csv"
+    log_suffix = "_log" if is_log_transform(test_code) else ""
+    return f"sp_df_{test_code}_full_m{min_measurements}{log_suffix}.csv"
 
 
 def is_fitted_canonical(test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
@@ -154,7 +218,7 @@ def fit_markers(tests_df: pd.DataFrame, test_codes: list, *, force: bool = False
     """Fits every marker in test_codes via compute_sp_df, in order, skipping (not aborting
     the whole run for) a marker with no/insufficient data or an unexpected fit failure (a bad
     pop_ri, a malformed row, ...). Shared by
-    perri_validation.scripts.run_setpoints_by_marker (explicit pre-fit stage covering all of
+    scripts.run_setpoints_by_marker (explicit pre-fit stage covering all of
     TESTCODES_LIST) and run_fig3_hazard (which needs the same 43 markers fit either way,
     whether or not the shared stage already warmed the cache).
     """
@@ -260,17 +324,20 @@ def compute_sp_df(
         df = tests_df[tests_df["test_code"] == test_code].copy()
         if df.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)
-        fitted = fit_batch(
-            df,
-            value_col=MEASUREMENT_COL,
-            timestamp_col=TS_COL,
-            patient_id_col=ID_COL,
-            test_code=test_code,
-            sex="ALL",
-            params=_params_override(test_code, df, sex="ALL"),
-            min_measurements=min_measurements,
-            n_jobs=n_jobs,
-        )
+
+        # fit_batch's `sex` is applied uniformly to every patient in `df` -- for
+        # sex-stratified markers it must be called once per sex on a sex-filtered
+        # slice (per fit_batch's own docstring), not once for the whole population.
+        if is_sex_stratified(test_code):
+            fitted_frames = []
+            for sex_label in ("F", "M"):
+                sex_df = df[df[SEX_COL] == sex_label]
+                if sex_df.empty:
+                    continue
+                fitted_frames.append(_fit_batch_for_group(sex_df, test_code, sex_label, min_measurements, n_jobs))
+            fitted = pd.concat(fitted_frames, ignore_index=True) if fitted_frames else pd.DataFrame()
+        else:
+            fitted = _fit_batch_for_group(df, test_code, "ALL", min_measurements, n_jobs)
         if fitted.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)
 
