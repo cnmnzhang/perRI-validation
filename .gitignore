@@ -18,13 +18,16 @@ outputs/
 # ignore scoping markdown files (they're for local viewing only)
 scoping*.md
 
-# Ground-truth comparison tooling: maintainer-only, never shipped to external validators.
-# data/UWM/ is already covered by data/* above.
+# Ground-truth comparison tooling
 utils/ground_truth_check.py
 tests/test_ground_truth_check.py
 scripts/diagnostics/compare_to_ground_truth.py
-scripts/diagnostics/validate_fig3_hazard.py
 
 # Example files (tracked despite the blanket rules above)
 !data/examples/
 !data/examples/*.csv
+
+# fig3_hazard ground truth: shipped, see the note above.
+!data/UWM/
+!data/UWM/fig3_hazard/
+!data/UWM/fig3_hazard/**
