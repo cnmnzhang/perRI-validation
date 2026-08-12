@@ -6,7 +6,7 @@ from typing import Union
 
 import pandas as pd
 
-from constants.runtime import ID_COL, MEASUREMENT_COL, SEX_COL, TEST_CODE_COL, TS_COL
+from constants.runtime import DIAGNOSIS_TS_COL, ICD9_COL, ICD10_COL, ID_COL, MEASUREMENT_COL, SEX_COL, TEST_CODE_COL, TS_COL
 from constants.schemas import DEMOGRAPHICS_SCHEMA, DX_SCHEMA, IRON_MAR_SCHEMA, PREGNANCY_LABS_SCHEMA, PREGNANCY_OUTCOMES_AND_DEMOGS_SCHEMA, TESTS_SCHEMA, TableSchema
 
 NUMERIC_OUTCOME_TRUE_VALUES = {"1", "true", "t", "yes", "y"}
@@ -141,11 +141,16 @@ def load_tests_csv(path: Union[str, Path]) -> pd.DataFrame:
     return df
 
 
-def tests_by_marker_dir(input_dir: Union[str, Path]) -> Path:
+
+def tests_by_marker_dir(input_dir: Union[str, Path, None]) -> Path:
+    if input_dir is None:
+        input_dir = Path(__file__).resolve().parents[1] / "data"
     return Path(input_dir) / "cache" / "tests_by_marker"
 
 
-def load_tests_marker_subset(input_dir: Union[str, Path], test_codes: list) -> pd.DataFrame:
+
+
+def load_tests_marker_subset(input_dir: Union[str, Path] = None, test_codes: list=None) -> pd.DataFrame:
     """Loads just `test_codes` from the split built by scripts/run_tests_by_marker.py.
 
     Unlike the earlier design, this never builds the split itself -- it's a pure
@@ -164,16 +169,23 @@ def load_tests_marker_subset(input_dir: Union[str, Path], test_codes: list) -> p
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[ID_COL, TS_COL, TEST_CODE_COL, MEASUREMENT_COL, SEX_COL])
 
 
-def load_dx_csv(path: Union[str, Path]) -> pd.DataFrame:
-    df = _read_csv_no_default_na(path, {ID_COL: str, "icd9": str, "icd10": str})
+def load_dx_csv(path: Union[str, Path], verbose: bool = True) -> pd.DataFrame:
+    path = Path(path)
+    if verbose:
+        size_mb = path.stat().st_size / 1e6 if path.exists() else 0
+        print(f"[io] reading {path} ({size_mb:,.0f} MB)...")
+        t0 = time.time()
+
+    df = _read_csv_no_default_na(path, {ID_COL: str, ICD9_COL: str, ICD10_COL: str})
     _validate_columns(df, DX_SCHEMA)
-    # dx_all_to_first_fast expects a "diagnosis_ts" column name
-    df = df.rename(columns={"date": "diagnosis_ts"})
-    df["diagnosis_ts"] = pd.to_datetime(df["diagnosis_ts"], errors="coerce")
+    df[DIAGNOSIS_TS_COL] = pd.to_datetime(df[DIAGNOSIS_TS_COL], errors="coerce")
     # icd9/icd10 are sparse by design (a row may populate only one) -- restore
     # NaN for the genuinely-blank cells now that the raw read is NA-string-safe.
-    df["icd9"] = df["icd9"].replace("", pd.NA)
-    df["icd10"] = df["icd10"].replace("", pd.NA)
+    df[ICD9_COL] = df[ICD9_COL].replace("", pd.NA)
+    df[ICD10_COL] = df[ICD10_COL].replace("", pd.NA)
+
+    if verbose:
+        print(f"[io] read {path}: {len(df):,} rows in {time.time() - t0:.1f}s")
     return df
 
 

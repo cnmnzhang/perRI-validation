@@ -2,14 +2,7 @@
 
 Not a hard prerequisite for the other analyses the way tests_by_marker/dx_incident are --
 utils.setpoints.compute_sp_df already caches per (marker, exact population, min_measurements),
-so fig3_hazard/fig3_dx/fig4_dx_cases still fit inline just fine if this hasn't been run. What
-this buys you is a dedicated, standalone place to run the expensive part (a Bayesian fit per
-patient, per marker, across all 43 markers -- the same ~2.5-3 hour job fig3_hazard does as
-part of its own run) independently of any one analysis's other work (Cox regression, plotting,
-...), so you can warm the cache once and have every full-population-fitting analysis
-afterward -- including fig5_iron_infusion, which prefers filtering an already-cached
-full-population HB fit over its own smaller cohort-only fit when one exists -- read straight
-from cache.
+so fig3_hazard/fig3_dx/fig4_dx_cases still fit inline just fine if this hasn't been run. 
 
 Fits TESTCODES_LIST specifically (all 43 pipeline markers), not every marker present in
 tests.csv: T4FR, for example, is read directly off the Tests table by fig4_dx_cases's
@@ -41,7 +34,7 @@ from constants.marker_config import TESTCODES_LIST  # noqa: E402
 from constants.runtime import DEFAULT_MIN_MEASUREMENTS, ID_COL  # noqa: E402
 
 
-def run(*, input_dir: Path, output_dir: Path, force: bool = False, markers: list[str] = None) -> dict:
+def run(*, input_dir: Path, output_dir: Path, force: bool = False, markers: list[str] = None, min_measurements=DEFAULT_MIN_MEASUREMENTS) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if markers is not None:
@@ -59,7 +52,8 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False, markers: list
         "n_markers_requested": len(test_codes),
         "n_markers_fitted": int(sp_df["test_code"].nunique()) if not sp_df.empty else 0,
         "n_patients_fitted": int(sp_df[ID_COL].nunique()) if not sp_df.empty else 0,
-        "outputs": [f"data/cache/sp_df_<test_code>_full_m{DEFAULT_MIN_MEASUREMENTS}.csv (one per marker, via utils.setpoints.compute_sp_df's own canonical cache)", "manifest.json"],
+        "min_measurements": min_measurements,
+        "outputs": [f"data/cache/sp_df_<test_code>_full_m{min_measurements}.csv (one per marker, via utils.setpoints.compute_sp_df's own canonical cache)", "manifest.json"],
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return manifest
@@ -71,10 +65,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "setpoints_by_marker")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--marker", action="append", dest="markers", help="Fit just this marker (repeatable). Must be in TESTCODES_LIST. Default: all 43.")
+    parser.add_argument("--min-measurements", type=int, default=DEFAULT_MIN_MEASUREMENTS, help=f"Minimum measurements per patient to include in fit. Default: {DEFAULT_MIN_MEASUREMENTS}.")
     args = parser.parse_args(argv)
 
     with tagged_stdout("setpoints_by_marker"):
-        manifest = run(input_dir=args.input_dir, output_dir=args.output_dir, force=args.force, markers=args.markers)
+        manifest = run(input_dir=args.input_dir, output_dir=args.output_dir, force=args.force, markers=args.markers, min_measurements=args.min_measurements)
     # print(json.dumps(manifest, indent=2, sort_keys=True))  # commented out -- clogs output; see save_fig_as_svg for per-figure Figure/Data lines instead
 
 

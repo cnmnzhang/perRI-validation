@@ -6,7 +6,7 @@ the loaders that consume them cannot silently drift apart.
 
 from dataclasses import dataclass
 
-from constants.runtime import ID_COL, MEASUREMENT_COL, SEX_COL, TEST_CODE_COL, TS_COL
+from constants.runtime import DIAGNOSIS_TS_COL, ICD9_COL, ICD10_COL, ID_COL, MEASUREMENT_COL, SEX_COL, TEST_CODE_COL, TS_COL
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ TESTS_SCHEMA = TableSchema(
 
 DX_SCHEMA = TableSchema(
     name="Dx",
-    required_columns=(ID_COL, "icd9", "icd10", "date"),
+    required_columns=(ID_COL, ICD9_COL, ICD10_COL, DIAGNOSIS_TS_COL),
     notes="One row per diagnosis event. icd9/icd10 may be sparse per row (only one need be populated); codes are matched by longest-prefix, dots/case-insensitive.",
 )
 

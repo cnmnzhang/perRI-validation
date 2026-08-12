@@ -8,8 +8,11 @@ sparse icd9/icd10 columns round-tripping through CSV correctly.
 import pandas as pd
 import pytest
 
+from pathlib import Path
+
 from scripts.run_tests_by_marker import build_tests_by_marker
 from utils.io import load_demographics_csv, load_dx_csv, load_iron_mar_csv, load_tests_csv, load_tests_marker_subset, resolve_tests_csv_path
+from utils.io import tests_by_marker_dir as resolve_tests_by_marker_dir
 from constants.schemas import ALL_SCHEMAS, DEMOGRAPHICS_SCHEMA, DX_SCHEMA, IRON_MAR_SCHEMA, TESTS_SCHEMA
 
 
@@ -143,21 +146,20 @@ def test_load_tests_csv_drops_unparseable_rows(tmp_path):
     assert df["anon_id"].iloc[0] == "p1"
 
 
-def test_load_dx_csv_renames_date_and_restores_sparse_nulls(tmp_path):
+def test_load_dx_csv_parses_timestamp_and_restores_sparse_nulls(tmp_path):
     path = tmp_path / "dx.csv"
     pd.DataFrame(
         {
             "anon_id": ["p1", "p2"],
             "icd9": ["280", ""],
             "icd10": ["", "N17"],
-            "date": ["2020-01-01", "2020-06-01"],
+            "diagnosis_ts": ["2020-01-01", "2020-06-01"],
         }
     ).to_csv(path, index=False)
 
     df = load_dx_csv(path)
 
-    assert "diagnosis_ts" in df.columns
-    assert "date" not in df.columns
+    assert pd.api.types.is_datetime64_any_dtype(df["diagnosis_ts"])
     assert pd.isna(df.loc[df["anon_id"] == "p1", "icd10"].iloc[0])
     assert pd.isna(df.loc[df["anon_id"] == "p2", "icd9"].iloc[0])
     assert df.loc[df["anon_id"] == "p1", "icd9"].iloc[0] == "280"
@@ -168,6 +170,11 @@ def test_load_dx_csv_missing_column_raises(tmp_path):
     pd.DataFrame({"anon_id": ["p1"], "icd9": ["280"], "icd10": [""]}).to_csv(path, index=False)
     with pytest.raises(ValueError, match=DX_SCHEMA.name):
         load_dx_csv(path)
+
+
+def test_tests_by_marker_dir_defaults_to_repo_data_dir_when_input_dir_is_none():
+    repo_root = Path(__file__).resolve().parents[1]
+    assert resolve_tests_by_marker_dir(None) == repo_root / "data" / "cache" / "tests_by_marker"
 
 
 def test_load_demographics_csv_drops_duplicate_anon_id(tmp_path):

@@ -34,11 +34,14 @@ ensure_importable()
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
+import numpy as np  # noqa: E402
+
 from utils.io import load_demographics_csv, load_dx_incident, load_tests_marker_subset  # noqa: E402
 from utils.logging_utils import tagged_stdout  # noqa: E402
 from utils.visuals_shared import save_fig_as_svg  # noqa: E402
 from utils.setpoints import compute_sp_df, is_fitted_canonical  # noqa: E402
 from utils.cache import cache_or_compute  # noqa: E402
+from utils.clinical import get as _get  # noqa: E402
 from utils.clinical.get import attach_ref_intervals  # noqa: E402
 from constants.fig_config import A4_WIDTH, FIG4_ROW1_HEIGHT  # noqa: E402
 from utils.km_exclusive import KMExclusiveInputs  # noqa: E402
@@ -52,6 +55,8 @@ from constants.runtime import (  # noqa: E402
     CV_COL,
     DELTA_COL,
     ID_COL,
+    INDEX_COL,
+    MEASUREMENT_COL,
     MU,
     OUT_PERRI_P95_COL,
     OUT_PERRI_P95_LOWER_COL,
@@ -60,9 +65,11 @@ from constants.runtime import (  # noqa: E402
     OUT_POPRI_LOWER_COL,
     OUT_POPRI_UPPER_COL,
     PERRI_Z_SCORE_COL,
+    PRESENT_TS_COL,
     PRESENT_VAL_COL,
     SEX_COL,
     SIGMA,
+    TS_COL,
 )
 from utils.clinical.inputs import ProgressionPanelInputs  # noqa: E402
 from utils.clinical.run_clinical import build_added_value_tables, build_reclassification_2x2_grids  # noqa: E402
@@ -73,6 +80,11 @@ from utils.visuals_fig4 import (  # noqa: E402
     plot_single_patient_history_on_ax,
 )
 DEMOGRAPHICS_FILE = "demographics.csv"
+
+# Manually-selected example patients, written by `scripts.run_fig4_dx_cases_case --accept N`.
+# Kept outside any single --output-dir so a saved case survives across output-dir choices.
+CASES_JSON_PATH = Path(__file__).resolve().parent.parent / "outputs" / "fig4_dx_cases_cases.json"
+BASELINE_SORT_N = 3
 
 def _outcome_markers(outcome_cfg) -> list[str]:
     """One outcome's own markers (outcome_cfg.markers, used by compute_sp_df) plus any
@@ -93,6 +105,232 @@ def _direction_columns(lower: bool, upper: bool) -> tuple[str, str]:
     if lower:
         return OUT_PERRI_P95_LOWER_COL, OUT_POPRI_LOWER_COL
     return OUT_PERRI_P95_UPPER_COL, OUT_POPRI_UPPER_COL
+
+
+# ---------------------------------------------------------------------------
+# Example-patient case selection (saved-case / group-B / naive-fallback tiers).
+# Mirrors bayesian-setpoint-inference's scripts/figures/fig4_prog.py +
+# fig4_prog_case.py case-selection machinery; scripts/run_fig4_dx_cases_case.py
+# is this repo's counterpart to fig4_prog_case.py for browsing/saving cases.
+# ---------------------------------------------------------------------------
+
+
+def _build_group_masks(df: pd.DataFrame, per_col: str, pop_col: str) -> dict[str, pd.Series]:
+    """KM-exclusive 2x2 group masks (mirrors KMExclusiveInputs.from_dataframe's masks)."""
+    pop_in, pop_out = df[pop_col] == 0, df[pop_col] == 1
+    per_in, per_out = df[per_col] == 0, df[per_col] == 1
+    return {"a": pop_in & per_in, "b": pop_in & per_out, "c": pop_out & per_in, "d": pop_out & per_out}
+
+
+def _load_cases() -> dict:
+    if CASES_JSON_PATH.exists():
+        return json.loads(CASES_JSON_PATH.read_text())
+    return {}
+
+
+def _save_case(outcome_name: str, patient_id: str) -> None:
+    """Write patient_id as the selected case for outcome_name to CASES_JSON_PATH."""
+    CASES_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+    cases = _load_cases()
+    cases[outcome_name] = str(patient_id)
+    CASES_JSON_PATH.write_text(json.dumps(cases, indent=2))
+    print(f"[case] Saved: {outcome_name} -> {patient_id}\n[case] Written to {CASES_JSON_PATH}")
+
+
+def _safe_z_sort(df: pd.DataFrame) -> pd.Series:
+    if SIGMA in df.columns:
+        sigma_safe = pd.to_numeric(df[SIGMA], errors="coerce").replace(0, np.nan)
+        return (pd.to_numeric(df[DELTA_COL], errors="coerce") / sigma_safe).abs()
+    return pd.to_numeric(df[DELTA_COL], errors="coerce").abs()
+
+
+def _add_baseline_sort_columns(
+    candidates: pd.DataFrame,
+    sp_df: pd.DataFrame,
+    test_code: str,
+    *,
+    id_col: str = ID_COL,
+    baseline_n: int = BASELINE_SORT_N,
+) -> pd.DataFrame:
+    """Add baseline-aware ranking columns for case selection.
+
+    Ranking prefers patients whose isolated values immediately before the presenting
+    value are all inside PopRI -- this avoids picking extreme low-variance baselines
+    solely because they inflate |delta/sigma|.
+    """
+    out = candidates.copy()
+    if out.empty:
+        return out
+
+    out["_z_sort"] = _safe_z_sort(out)
+    out["_delta_abs_sort"] = pd.to_numeric(out[DELTA_COL], errors="coerce").abs()
+    out["_baseline_popri_ok"] = False
+    out["_pre_all_popri_ok"] = False
+    out["_trajectory_n"] = 0
+    out["_event_lag_days"] = np.nan
+
+    if "first_in_window_event" in out.columns and PRESENT_TS_COL in out.columns:
+        event_ts = pd.to_datetime(out["first_in_window_event"], errors="coerce")
+        presenting_ts = pd.to_datetime(out[PRESENT_TS_COL], errors="coerce")
+        out["_event_lag_days"] = (event_ts - presenting_ts).dt.days
+
+    required = {id_col, TS_COL, MEASUREMENT_COL}
+    if sp_df is None or not required.issubset(sp_df.columns) or PRESENT_TS_COL not in out.columns:
+        return out
+
+    sp_local = sp_df.copy()
+    sp_local[id_col] = sp_local[id_col].astype(str)
+    sp_local[TS_COL] = pd.to_datetime(sp_local[TS_COL], errors="coerce")
+    sp_local = sp_local.sort_values([id_col, TS_COL])
+    grouped = {pid: pat for pid, pat in sp_local.groupby(id_col, sort=False)}
+
+    for idx, row in out.iterrows():
+        patient_id = str(row[id_col])
+        patient_sp = grouped.get(patient_id)
+        if patient_sp is None or patient_sp.empty:
+            continue
+
+        presenting_ts = pd.to_datetime(row[PRESENT_TS_COL], errors="coerce")
+        if pd.isna(presenting_ts):
+            continue
+
+        before = patient_sp[patient_sp[TS_COL] < presenting_ts]
+        same_day = patient_sp[patient_sp[TS_COL].dt.normalize().eq(presenting_ts.normalize())]
+        if not same_day.empty and INDEX_COL in patient_sp.columns:
+            presenting_index = same_day.iloc[0].get(INDEX_COL, np.nan)
+            if pd.notna(presenting_index):
+                before = patient_sp[pd.to_numeric(patient_sp[INDEX_COL], errors="coerce") < float(presenting_index)]
+
+        baseline = pd.to_numeric(before.tail(baseline_n)[MEASUREMENT_COL], errors="coerce").dropna()
+        if baseline.empty:
+            continue
+
+        sex = row.get(SEX_COL, patient_sp[SEX_COL].iloc[0] if SEX_COL in patient_sp.columns else "ALL")
+        if pd.isna(sex):
+            sex = "ALL"
+        pop_lo, pop_hi = _get.popRI(sex=sex, test_code=test_code)
+        pre_values = pd.to_numeric(before[MEASUREMENT_COL], errors="coerce").dropna()
+        out.loc[idx, "_trajectory_n"] = int(len(patient_sp))
+        out.loc[idx, "_baseline_popri_ok"] = bool(len(baseline) >= baseline_n and ((baseline >= pop_lo) & (baseline <= pop_hi)).all())
+        out.loc[idx, "_pre_all_popri_ok"] = bool(len(pre_values) >= baseline_n and ((pre_values >= pop_lo) & (pre_values <= pop_hi)).all())
+
+    return out
+
+
+def find_candidates(
+    presenting_df: pd.DataFrame,
+    sp_df: pd.DataFrame,
+    outcome_cfg,
+    *,
+    group: str = "b",
+    events_only: bool = True,
+) -> pd.DataFrame:
+    """Return candidate rows sorted by baseline plausibility, then |delta|.
+
+    Used both by the tiered example-patient selector below and by
+    scripts/run_fig4_dx_cases_case.py for interactive browsing.
+    """
+    per_col, pop_col = _direction_columns(outcome_cfg.flag_below, outcome_cfg.flag_above)
+    missing = [c for c in [pop_col, per_col, DELTA_COL] if c not in presenting_df.columns]
+    if missing:
+        raise KeyError(f"Columns missing from presenting_df: {missing}")
+
+    df = presenting_df.copy()
+    if group != "all":
+        masks = _build_group_masks(df, per_col, pop_col)
+        if group not in masks:
+            raise ValueError(f"Unknown group {group!r}.")
+        df = df[masks[group]].copy()
+
+    if events_only and "any_in_window" in df.columns:
+        df = df[df["any_in_window"] == 1].copy()
+
+    # Keep only "timely" presenters -- patients whose flag appeared at (or shortly
+    # after) their first eligible presenting test, not years after eligibility opened.
+    if "anchor_ts" in df.columns and PRESENT_TS_COL in df.columns:
+        washout_years = float(getattr(outcome_cfg, "washout_years", 0) or 0)
+        presenting_min_year = getattr(outcome_cfg, "presenting_min_year", None)
+        anchor_ts = pd.to_datetime(df["anchor_ts"])
+        pres_ts = pd.to_datetime(df[PRESENT_TS_COL])
+        min_eligible = anchor_ts + pd.to_timedelta(washout_years * 365.25, unit="D")
+        if presenting_min_year is not None:
+            min_eligible = min_eligible.clip(lower=pd.Timestamp(presenting_min_year))
+        timely = (pres_ts - min_eligible).dt.days <= 400
+        n_before = len(df)
+        if timely.any():
+            df = df[timely].copy()
+        print(f"[find_candidates] {len(df)}/{n_before} retained")
+
+    if df.empty:
+        return df
+
+    test_code = outcome_cfg.markers[0]
+    df = _add_baseline_sort_columns(df, sp_df, test_code)
+    df = df.sort_values(["_baseline_popri_ok", "_delta_abs_sort", "_z_sort"], ascending=[False, False, False])
+
+    if "first_in_window_event" in df.columns and PRESENT_TS_COL in df.columns:
+        t_event = pd.to_datetime(df["first_in_window_event"], errors="coerce")
+        t_pres = pd.to_datetime(df[PRESENT_TS_COL], errors="coerce")
+        df["days_to_event"] = (t_event - t_pres).dt.days
+    else:
+        df["days_to_event"] = np.nan
+
+    return df.reset_index(drop=True)
+
+
+def _select_fallback_patient(presenting_df_oo_km: pd.DataFrame, sp_df_test_code: pd.DataFrame):
+    """Naive fallback: first event patient, no PerRI/baseline requirement."""
+    event_patients = presenting_df_oo_km[presenting_df_oo_km["any_in_window"] == 1]
+    if event_patients.empty:
+        return None
+    example_patient = event_patients.iloc[0]
+    patient_id = example_patient[ID_COL]
+    patient_sp_data = sp_df_test_code[sp_df_test_code[ID_COL] == patient_id]
+    if patient_sp_data.empty:
+        return None
+    presenting_row = presenting_df_oo_km[presenting_df_oo_km[ID_COL] == patient_id]
+    return {"patient_sp_data": patient_sp_data, "presenting_row": presenting_row, "event_row": presenting_row}
+
+
+def _select_example_patient(
+    outcome_name: str,
+    presenting_df_oo_km: pd.DataFrame,
+    sp_df_test_code: pd.DataFrame,
+    outcome_cfg,
+):
+    """Select the example patient for one outcome's trajectory panel.
+
+    Fallback order:
+    1. Saved case from CASES_JSON_PATH (manually selected via run_fig4_dx_cases_case.py --accept).
+    2. Best group-B candidate (pop_in & per_out & event), ranked by baseline plausibility then |delta|.
+    3. _select_fallback_patient (first event patient, no PerRI requirement).
+    """
+    cases = _load_cases()
+    patient_id = cases.get(outcome_name)
+    if patient_id:
+        patient_sp_data = sp_df_test_code[sp_df_test_code[ID_COL] == patient_id]
+        presenting_row = presenting_df_oo_km[presenting_df_oo_km[ID_COL] == patient_id]
+        if not patient_sp_data.empty and not presenting_row.empty:
+            print(f"[{outcome_name}] using saved case {patient_id}")
+            return {"patient_sp_data": patient_sp_data, "presenting_row": presenting_row, "event_row": presenting_row}
+        print(f"[{outcome_name}] saved case {patient_id} not found in data -- falling back")
+
+    try:
+        candidates = find_candidates(presenting_df_oo_km, sp_df_test_code, outcome_cfg, group="b", events_only=True)
+    except Exception as exc:
+        print(f"[{outcome_name}] could not rank group-B candidates ({exc}) -- falling back")
+        candidates = pd.DataFrame()
+
+    if not candidates.empty:
+        best = candidates.iloc[0]
+        patient_id = best[ID_COL]
+        patient_sp_data = sp_df_test_code[sp_df_test_code[ID_COL] == patient_id]
+        presenting_row = presenting_df_oo_km[presenting_df_oo_km[ID_COL] == patient_id]
+        if not patient_sp_data.empty:
+            print(f"[{outcome_name}] auto-selected group B case {patient_id}")
+            return {"patient_sp_data": patient_sp_data, "presenting_row": presenting_row, "event_row": presenting_row}
+
+    return _select_fallback_patient(presenting_df_oo_km, sp_df_test_code)
 
 
 def _prepare_forest_model_data(presenting_df_oo_km: pd.DataFrame):
@@ -176,20 +414,6 @@ def _heatmap_tidy_df(spec: dict) -> pd.DataFrame:
     )
 
 
-def _select_example_patient(presenting_df_oo_km: pd.DataFrame, sp_df_test_code: pd.DataFrame):
-    """Mirrors scripts/figures/fig4_prog.py:_select_fig4_example_patient (the simple fallback path)."""
-    event_patients = presenting_df_oo_km[presenting_df_oo_km["any_in_window"] == 1]
-    if event_patients.empty:
-        return None
-    example_patient = event_patients.iloc[0]
-    patient_id = example_patient[ID_COL]
-    patient_sp_data = sp_df_test_code[sp_df_test_code[ID_COL] == patient_id]
-    if patient_sp_data.empty:
-        return None
-    presenting_row = presenting_df_oo_km[presenting_df_oo_km[ID_COL] == patient_id]
-    return {"patient_sp_data": patient_sp_data, "presenting_row": presenting_row, "event_row": presenting_row}
-
-
 def compute_one_outcome(outcome_name: str, *, input_dir: Path, dx_incident, demographics_df, output_dir: Path, force: bool = False) -> dict:
     """Computes (does not plot) everything one row of the combined mosaic needs.
 
@@ -240,7 +464,7 @@ def compute_one_outcome(outcome_name: str, *, input_dir: Path, dx_incident, demo
     except Exception as exc:
         print(f"[{outcome_name}] forest model fit failed, showing 'no results' in that panel instead: {exc}")
         model_results = None
-    example_bundle = _select_example_patient(presenting_df_oo_km, sp_df)
+    example_bundle = _select_example_patient(outcome_name, presenting_df_oo_km, sp_df, outcome_cfg)
 
     group_summary = []
     for group, mask in km_inputs.masks.items():

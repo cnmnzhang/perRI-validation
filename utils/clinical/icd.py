@@ -3,13 +3,14 @@
 ``dx_all_to_first_fast`` and its helpers (the vectorized path).
 """
 
+import time
 from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 
 from constants.icd_config import ICD10_2_DX, ICD9_2_DX
-from constants.runtime import ID_COL
+from constants.runtime import DIAGNOSIS_TS_COL, ICD9_COL, ICD10_COL, ID_COL
 
 
 def _flatten_columns_inplace(df: pd.DataFrame) -> None:
@@ -70,9 +71,9 @@ def dx_all_to_first_fast(
     dx_all: pd.DataFrame,
     *,
     id_col: str = ID_COL,
-    icd9_col: str = "icd9",
-    icd10_col: str = "icd10",
-    ts_col: str = "diagnosis_ts",
+    icd9_col: str = ICD9_COL,
+    icd10_col: str = ICD10_COL,
+    ts_col: str = DIAGNOSIS_TS_COL,
     prefer: str = "icd9",  
 ) -> pd.DataFrame:
     """
@@ -85,6 +86,9 @@ def dx_all_to_first_fast(
     Returns columns: [id_col, "diagnosis_name", "earliest_contact_date"]
     """
 
+    t0 = time.time()
+    print(f"[icd] {len(dx_all):,} raw diagnosis rows")
+
     # 0) Flatten columns if needed (fixes KeyError on MultiIndex like ('epic_pat_id',))
     _flatten_columns_inplace(dx_all)
 
@@ -94,10 +98,12 @@ def dx_all_to_first_fast(
         dx_all = dx_all.drop_duplicates(subset=subset_cols).copy()
     else:
         dx_all = dx_all.copy()
+    print(f"[icd] deduplicated to {len(dx_all):,} rows ({time.time() - t0:.1f}s elapsed)")
 
     # 2) Build layered prefix lookups once
     icd9_layers = _build_prefix_layers(ICD9_2_DX)
     icd10_layers = _build_prefix_layers(ICD10_2_DX)
+    print(f"[icd] built prefix lookups: {len(icd9_layers)} icd9 layer(s), {len(icd10_layers)} icd10 layer(s) ({time.time() - t0:.1f}s elapsed)")
 
     # 3) Map per unique code and broadcast back
     if icd9_col in dx_all.columns and icd9_layers:
@@ -105,6 +111,7 @@ def dx_all_to_first_fast(
         m9 = pd.DataFrame({icd9_col: u9})
         m9["dx_list9"] = _vectorized_map_by_prefix(m9[icd9_col], icd9_layers)
         dx_all = dx_all.merge(m9, on=icd9_col, how="left")
+        print(f"[icd] mapped {len(u9):,} unique icd9 codes ({time.time() - t0:.1f}s elapsed)")
     else:
         dx_all["dx_list9"] = pd.NA
 
@@ -113,6 +120,7 @@ def dx_all_to_first_fast(
         m10 = pd.DataFrame({icd10_col: u10})
         m10["dx_list10"] = _vectorized_map_by_prefix(m10[icd10_col], icd10_layers)
         dx_all = dx_all.merge(m10, on=icd10_col, how="left")
+        print(f"[icd] mapped {len(u10):,} unique icd10 codes ({time.time() - t0:.1f}s elapsed)")
     else:
         dx_all["dx_list10"] = pd.NA
 
@@ -129,7 +137,7 @@ def dx_all_to_first_fast(
     # quick stats (optional)
     n_total = len(dx_all)
     n_matched = int((has9 | has10).sum())
-    print(f"Matched: {n_matched} / {n_total} ({n_total - n_matched} unmatched)")
+    print(f"[icd] matched: {n_matched} / {n_total} ({n_total - n_matched} unmatched; unrelated to our analysis) ({time.time() - t0:.1f}s elapsed)")
     print(dx_all["matched_by"].value_counts(dropna=False).to_string())
     print("with preference:", prefer)
 
@@ -139,9 +147,11 @@ def dx_all_to_first_fast(
     out = dx_all.loc[dx_all["diagnosis_name_list"].notna(), need_cols].copy()
     out = out.explode("diagnosis_name_list", ignore_index=True).rename(columns={"diagnosis_name_list": "diagnosis_name"})
     out[ts_col] = pd.to_datetime(out[ts_col], errors="coerce")
+    print(f"[icd] exploded to {len(out):,} (patient, diagnosis) rows ({time.time() - t0:.1f}s elapsed)")
 
     dx_incident = out.groupby([id_col, "diagnosis_name"], observed=True)[ts_col].min().reset_index().rename(columns={ts_col: "earliest_contact_date"})
     dx_incident["earliest_contact_date"] = pd.to_datetime(dx_incident["earliest_contact_date"])
     dx_incident["diagnosis_name"] = dx_incident["diagnosis_name"].astype("category")
+    print(f"[icd] reduced to {len(dx_incident):,} incident (patient, diagnosis) pairs ({time.time() - t0:.1f}s total)")
 
     return dx_incident

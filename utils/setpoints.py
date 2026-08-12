@@ -27,6 +27,7 @@ from utils.cache import cache_or_compute as _cache_or_compute
 from utils.cache import hash_dataframe
 from utils.clinical.get import popRI
 from utils.hp_sex_selector import is_sex_stratified
+from utils.io import load_tests_marker_subset
 from utils.log_transform_markers import is_log_transform
 from perri import fit_batch, get_default_params
 
@@ -277,6 +278,7 @@ def compute_sp_df(
     force: bool = False,
     n_jobs: int = N_JOBS,
     canonical: bool = False,
+    input_dir: "str | Path | None" = None,
 ) -> pd.DataFrame:
     """Compute setpoints for one marker from a generic Tests table, via perri.
 
@@ -306,6 +308,11 @@ def compute_sp_df(
         `_canonical_cache_name`) instead of hashing tests_df. Only valid when
         tests_df (when supplied) is that marker's whole, unfiltered population --
         see `fit_markers_lazy`, which is the intended caller.
+    input_dir : where to load `test_code`'s per-marker split from (via
+        load_tests_marker_subset) on a canonical cache miss when `tests_df` is
+        None. None resolves to the repo's default `data/` dir (see
+        `tests_by_marker_dir`). Ignored when `tests_df` is supplied or the
+        canonical cache already hits.
 
     Returns
     -------
@@ -321,6 +328,9 @@ def compute_sp_df(
         cache_name = _cache_name_for(df, test_code, min_measurements)
 
     def _compute() -> pd.DataFrame:
+        nonlocal tests_df
+        if tests_df is None:
+            tests_df = load_tests_marker_subset(input_dir, test_codes=[test_code])
         df = tests_df[tests_df["test_code"] == test_code].copy()
         if df.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)

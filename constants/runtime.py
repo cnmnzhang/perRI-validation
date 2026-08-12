@@ -17,6 +17,13 @@ PRESENT_VAL_COL = "presenting_value"
 PRESENT_TS_COL = "presenting_ts"
 
 # -----------------------
+# Dx table column names
+# -----------------------
+ICD9_COL = "icd9"
+ICD10_COL = "icd10"
+DIAGNOSIS_TS_COL = "diagnosis_ts"
+
+# -----------------------
 # Clinical output column names (from add_oo)
 # -----------------------
 PERRI_Z_SCORE_COL = "perRI_z_score"  # Continuous z-score: (result - setpoint) / sigma

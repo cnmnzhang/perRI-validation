@@ -6,7 +6,7 @@ earliest ("incident") date that diagnosis appears. fig3_dx and fig4_dx_cases
 both read this output rather than re-deriving it (run dx_incident first:
 python -m scripts.run_dx_incident).
 
-Required inputs: a Dx table (anon_id, icd9, icd10, date) -- see
+Required inputs: a Dx table (anon_id, icd9, icd10, diagnosis_ts) -- see
 README.md.
 
 Run:

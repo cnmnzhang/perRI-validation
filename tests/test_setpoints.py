@@ -223,6 +223,22 @@ def test_compute_sp_df_canonical_hit_never_touches_tests_df():
     assert set(sp_df["anon_id"]) == {"p1"}
 
 
+def test_compute_sp_df_canonical_miss_lazily_loads_from_input_dir(tmp_path):
+    """canonical=True with tests_df=None and a cold cache must load test_code's split
+    off disk via input_dir (e.g. a caller building an m5 canonical cache that doesn't
+    exist yet, without loading/pre-filtering tests_df itself first)."""
+    input_dir = tmp_path / "data"
+    input_dir.mkdir()
+    tests_df = _isolated_series("p1", "F")
+    tests_df.to_csv(input_dir / "tests.csv", index=False)
+    build_tests_by_marker(input_dir)
+
+    sp_df = compute_sp_df(None, test_code="HB", force=True, canonical=True, input_dir=input_dir)
+
+    assert set(sp_df["anon_id"]) == {"p1"}
+    assert is_fitted_canonical("HB") is True
+
+
 def test_fit_markers_lazy_skips_loading_an_already_fitted_marker(tmp_path):
     input_dir = tmp_path / "data"
     input_dir.mkdir()
