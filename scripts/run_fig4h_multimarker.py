@@ -53,7 +53,7 @@ from utils.logging_utils import tagged_stdout, timed_step  # noqa: E402
 from utils.setpoints import (  # noqa: E402
     compute_sp_df,
 )
-from utils.visuals_shared import add_panel_label, save_fig_as_svg  # noqa: E402
+from utils.visuals_shared import save_fig_as_svg  # noqa: E402
 
 
 PANELS = {
@@ -394,7 +394,7 @@ def _plot_heatmap(ax, pct: pd.DataFrame, n: pd.DataFrame, title: str, vmax: floa
         pct,
         ax=ax,
         annot=_make_annot(pct, n),
-        annot_kws={"fontsize": FIG4_HEATMAP_ANNOT_FONTSIZE},
+        annot_kws={"fontsize": 5},
         fmt="",
         cmap="YlOrRd",
         vmin=0,
@@ -431,8 +431,6 @@ def _plot_heatmaps(rates: pd.DataFrame, path: Path) -> None:
         [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])],
         [fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])],
     ]
-
-    add_panel_label(axes[0][0], "h", x=-0.6, y=1.3)
 
     for (row, col), (panel, outcome) in zip([(0, 0), (0, 1), (1, 0), (1, 1)], layout):
         pct, n = grids[(panel, outcome)]

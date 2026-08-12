@@ -53,12 +53,6 @@ def year_since_baseline(ts, extend_days=90):
     return years.to_numpy(), years_est.to_numpy()
 
 
-def add_panel_label(ax, label: str, x: float = -0.65, y: float = 1.05, fontsize: int = 12, fontweight: str = "bold") -> None:
-    """Add a panel label (e.g. "a", "b", "e") in axes coordinates, used by the
-    pregnancy analysis's combined mosaic."""
-    ax.text(x, y, label, transform=ax.transAxes, fontsize=fontsize, fontweight=fontweight, ha="left", va="top")
-
-
 def save_fig_as_svg(fig, title: str, path: Union[str, Path], csv_path: Optional[Union[str, Path]] = None) -> Path:
     """Save `fig` as SVG to `path` and print a two-line "Figure: <path>" (+ "Data: <csv_path>"
     if given) block, so console output links directly to what a run actually produced --
