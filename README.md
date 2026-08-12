@@ -9,7 +9,7 @@ Schemas are defined in `constants/schemas.py`. Column names are referred to by v
 | Table | File ([click for example](data/examples/)) | Required columns | Used by |
 |---|---|---|---|
 | Tests | `data/tests.csv` (or `tests.csv.gz`) ([`tests_example.csv`](data/examples/tests_example.csv))| `anon_id, ts, test_code, result_value, sex` | fig5_iron_infusion, fig4_dx_cases, fig3_dx, fig3_hazard |
-| Dx | `data/dx.csv` ([`dx_example.csv`](data/examples/dx_example.csv))| `anon_id, icd9, icd10, date` | dx_incident |
+| Dx | `data/dx.csv` ([`dx_example.csv`](data/examples/dx_example.csv))| `anon_id, icd9, icd10, diagnosis_ts` | dx_incident |
 | Demographics | `data/demographics.csv` ([`demographics_example.csv`](data/examples/demographics_example.csv))| `anon_id, sex, birth_date, death_ts` | fig3_dx, fig4_dx_cases, fig3_hazard |
 | iron_mar | `data/iron_mar.csv` ([`iron_mar_example.csv`](data/examples/iron_mar_example.csv))| `anon_id, ts` | fig5_iron_infusion|
 | pregnancy_labs | `data/pregnancy_labs.csv` ([`pregnancy_labs_example.csv`](data/examples/pregnancy_labs_example.csv))| `anon_id, ts, test_code, result_value` | fig4_pregnancy |
@@ -25,6 +25,7 @@ One row per patient per test over time, covering every marker needed. Analysis f
 - fig3_dx: `HB` , `TNEUT` , `ALB`, `ALT`, `MCV`, `P`, `GLU`, `K` 
 - fig5_iron_infusion: `HB`
 - fig4_dx_cases: `CRE`, `WBC`, `TSH` + **`T4FR` (T4FR isn't assessed as a routine laboratory test, but used to identify incident hypothyroidism)**
+- fig4h_multimarker: `CBC` and `BMP` batteries
 
 **Markers by battery.** Also listed in `constants/marker_lab_config.py:TESTCODES_LIST`.
 
@@ -80,6 +81,7 @@ python -m scripts.run_dx_incident
 python -m scripts.run_fig3_hazard
 python -m scripts.run_fig3_dx
 python -m scripts.run_fig4_dx_cases
+python -m scripts.run_fig4h_multimarker
 python -m scripts.run_fig5_iron_infusion
 #### Analysis with no dependencies
 python -m scripts.run_fig4_pregnancy
@@ -106,6 +108,7 @@ Pass `--force` to any script to recompute (ignoring any existing cache for that 
 |`fig3_hazard`|figure analyses|for each of the 43 markers, using the setpoint caches, fits a mortality Cox regression on the patient's personal setpoint (mu/sigma/cv, adjusted for age and sex). a. `fig3a_hr_by_model.svg` using each patient's 5th setpoint, and b. `fig3b_hr_by_baseline` using the setpoint from only their 1st through 5th isolated measurement, to see how hazard ratios stabilize as more data accumulates | `outputs/fig3_hazard/*` |
 |`fig3_dx`|figure analyses|uses `dx_incident`'s output, for each of 8 diagnoses, patients not yet diagnosed as of their 3rd personal setpoint estimate are split by whether that setpoint falls above/below a sex-specific 25th or 75th population percentile cutoff, and KM survival curves are fit per group| `outputs/fig4_dx_cases/*`|
 |`fig4_dx_cases`|figure analyses|for each marker-outcome pair (**CRE** -> acute kidney injury, **WBC** -> leukemia, **TSH** -> hypothyroidism), builds a cohort anchored on a patient's setpoint and produces one combined figure with a row per outcome: a representative patient trajectory, the odds-ratio forest plot, Kaplan-Meier curves, and a reclassification confusion matrix heatmap.| Each case saves the plotted data to `fig4_dx_cases_<case>_ors.csv`,`fig4_dx_cases_<case>_km_data.csv`, and `fig4_dx_cases_<case>_heatmap_t1.csv`|
+|`fig4h_multimarker`|figure analyses|for each of two batteries (**CBC**, **BMP**), builds a cohort of patients with a complete same-day marker panel post-washout, bins patients by how many markers fall outside their personal (perRI) vs population (popRI) reference interval, and reports 1-year incident-diagnosis rates per bin|`outputs/fig4h_multimarker/*`. UWM ground-truth counts/rates for comparison are in `data/UWM/fig4h/fig4h_ground_truth.csv`|
 |`fig4_pregnancy`|figure analyses|for two marker-outcome pairs (**WBC** -> pre-eclampsia, **HCT** -> received a transfusion), fits each patient's pre-conception personal setpoint, and produces a 2x3 panel figure|`outputs/fig4_pregnancy/*`|
 |`fig5_iron_infusion`|figure analyses|identifies each patient's first IV iron infusion course, pairs it with pre/post-treatment **HB** lab values and a personal setpoint, and produces a 6-panel figure covering treatment timing, dose-response, lab trajectories around treatment, and response by baseline severity|`outputs/fig5_iron_infusion/*`|
 
