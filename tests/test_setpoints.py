@@ -10,8 +10,8 @@ import pytest
 
 import utils.setpoints as setpoints_module
 from constants.runtime import DEFAULT_MIN_MEASUREMENTS
-from scripts.run_tests_by_marker import build_tests_by_marker
-from utils.setpoints import SP_DF_COLUMNS, _compute_popri_patch, _grid_bounds_from_pop_ri, _params_override, compute_sp_df, fit_markers, fit_markers_lazy, is_fitted, is_fitted_canonical
+from scripts.build_splits_by_marker import build_splits_by_marker
+from utils.setpoints import SP_DF_COLUMNS, _compute_popri_patch, _grid_bounds_from_pop_ri, _params_override, compute_sp_df, fit_markers, is_fitted, is_fitted_full_population
 
 
 @pytest.fixture(autouse=True)
@@ -166,37 +166,11 @@ def test_is_fitted_respects_min_measurements_as_part_of_cache_key():
     assert is_fitted(tests_df, "HB", min_measurements=3) is False
 
 
-def test_fit_markers_fits_every_marker_and_concatenates():
-    tests_df = pd.concat([_isolated_series("p1", "F"), _isolated_series("p1", "F", value=90.0).assign(test_code="GLU")], ignore_index=True)
-    sp_df = fit_markers(tests_df, ["HB", "GLU"], force=True)
-    assert set(sp_df["test_code"].unique()) == {"HB", "GLU"}
-
-
-def test_fit_markers_skips_marker_with_no_data_without_aborting():
-    tests_df = _isolated_series("p1", "F")  # only HB
-    sp_df = fit_markers(tests_df, ["HB", "NONEXISTENT_MARKER"], force=True)
-    assert set(sp_df["test_code"].unique()) == {"HB"}
-
-
-def test_fit_markers_reuses_cache_on_second_call(tmp_path, monkeypatch):
-    cache_dir = tmp_path / "cache"
-    monkeypatch.setattr(setpoints_module, "CACHE_DIR", cache_dir)
+def test_compute_sp_df_full_population_writes_fingerprint_free_cache_name():
     tests_df = _isolated_series("p1", "F")
+    compute_sp_df(tests_df, test_code="HB", force=True, full_population=True)
 
-    fit_markers(tests_df, ["HB"], force=True)
-    n_files_after_first = len(list(cache_dir.glob("sp_df_HB_*.csv")))
-
-    fit_markers(tests_df, ["HB"], force=False)
-    n_files_after_second = len(list(cache_dir.glob("sp_df_HB_*.csv")))
-
-    assert n_files_after_first == n_files_after_second == 1
-
-
-def test_compute_sp_df_canonical_writes_fingerprint_free_cache_name():
-    tests_df = _isolated_series("p1", "F")
-    compute_sp_df(tests_df, test_code="HB", force=True, canonical=True)
-
-    assert is_fitted_canonical("HB") is True
+    assert is_fitted_full_population("HB") is True
     assert (setpoints_module.CACHE_DIR / f"sp_df_HB_full_m{DEFAULT_MIN_MEASUREMENTS}.csv").exists()
 
 
@@ -207,57 +181,86 @@ def test_log_transform_marker_gets_distinct_log_suffixed_cache_name():
     investigating whether it should be log-transformed, as happened for TSH) produces two
     separate cache files instead of one silently overwriting the other."""
     tests_df = _isolated_series("p1", "F", value=100.0).assign(test_code="GLU")
-    compute_sp_df(tests_df, test_code="GLU", force=True, canonical=True)
+    compute_sp_df(tests_df, test_code="GLU", force=True, full_population=True)
 
-    assert is_fitted_canonical("GLU") is True
+    assert is_fitted_full_population("GLU") is True
     assert (setpoints_module.CACHE_DIR / f"sp_df_GLU_full_m{DEFAULT_MIN_MEASUREMENTS}_log.csv").exists()
     assert not (setpoints_module.CACHE_DIR / f"sp_df_GLU_full_m{DEFAULT_MIN_MEASUREMENTS}.csv").exists()
 
 
-def test_compute_sp_df_canonical_hit_never_touches_tests_df():
+def test_compute_sp_df_full_population_hit_never_touches_tests_df():
     tests_df = _isolated_series("p1", "F")
-    compute_sp_df(tests_df, test_code="HB", force=True, canonical=True)
+    compute_sp_df(tests_df, test_code="HB", force=True, full_population=True)
 
-    # On a canonical cache hit, tests_df is never read -- None must work fine.
-    sp_df = compute_sp_df(None, test_code="HB", canonical=True)
+    # On a full_population cache hit, tests_df is never read -- None must work fine.
+    sp_df = compute_sp_df(None, test_code="HB", full_population=True)
     assert set(sp_df["anon_id"]) == {"p1"}
 
 
-def test_compute_sp_df_canonical_miss_lazily_loads_from_input_dir(tmp_path):
-    """canonical=True with tests_df=None and a cold cache must load test_code's split
-    off disk via input_dir (e.g. a caller building an m5 canonical cache that doesn't
+def test_compute_sp_df_full_population_miss_lazily_loads_from_input_dir(tmp_path):
+    """full_population=True with tests_df=None and a cold cache must load test_code's split
+    off disk via input_dir (e.g. a caller building an m5 full_population cache that doesn't
     exist yet, without loading/pre-filtering tests_df itself first)."""
     input_dir = tmp_path / "data"
     input_dir.mkdir()
     tests_df = _isolated_series("p1", "F")
     tests_df.to_csv(input_dir / "tests.csv", index=False)
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
-    sp_df = compute_sp_df(None, test_code="HB", force=True, canonical=True, input_dir=input_dir)
+    sp_df = compute_sp_df(None, test_code="HB", force=True, full_population=True, input_dir=input_dir)
 
     assert set(sp_df["anon_id"]) == {"p1"}
-    assert is_fitted_canonical("HB") is True
+    assert is_fitted_full_population("HB") is True
 
 
-def test_fit_markers_lazy_skips_loading_an_already_fitted_marker(tmp_path):
+def test_fit_markers_skips_loading_an_already_fitted_marker(tmp_path):
     input_dir = tmp_path / "data"
     input_dir.mkdir()
     tests_df = _isolated_series("p1", "F")
     tests_df.to_csv(input_dir / "tests.csv", index=False)
-    build_tests_by_marker(input_dir)
-    compute_sp_df(tests_df, test_code="HB", force=True, canonical=True)
+    build_splits_by_marker(input_dir)
+    compute_sp_df(tests_df, test_code="HB", force=True, full_population=True)
 
-    sp_df = fit_markers_lazy(input_dir, ["HB"], force=False)
+    sp_df = fit_markers(input_dir, ["HB"], force=False)
     assert set(sp_df["test_code"].unique()) == {"HB"}
 
 
-def test_fit_markers_lazy_fits_and_caches_canonically_when_cold(tmp_path):
+def test_fit_markers_fits_and_caches_as_full_population_when_cold(tmp_path):
     input_dir = tmp_path / "data"
     input_dir.mkdir()
     tests_df = _isolated_series("p1", "F")
     tests_df.to_csv(input_dir / "tests.csv", index=False)
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
-    sp_df = fit_markers_lazy(input_dir, ["HB"], force=True)
+    sp_df = fit_markers(input_dir, ["HB"], force=True)
     assert set(sp_df["test_code"].unique()) == {"HB"}
-    assert is_fitted_canonical("HB") is True
+    assert is_fitted_full_population("HB") is True
+
+
+def test_fit_markers_skips_marker_with_no_data_without_aborting(tmp_path):
+    input_dir = tmp_path / "data"
+    input_dir.mkdir()
+    tests_df = _isolated_series("p1", "F")  # only HB
+    tests_df.to_csv(input_dir / "tests.csv", index=False)
+    build_splits_by_marker(input_dir)
+
+    sp_df = fit_markers(input_dir, ["HB", "NONEXISTENT_MARKER"], force=True)
+    assert set(sp_df["test_code"].unique()) == {"HB"}
+
+
+def test_fit_markers_reuses_cache_on_second_call(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(setpoints_module, "CACHE_DIR", cache_dir)
+    input_dir = tmp_path / "data"
+    input_dir.mkdir()
+    tests_df = _isolated_series("p1", "F")
+    tests_df.to_csv(input_dir / "tests.csv", index=False)
+    build_splits_by_marker(input_dir)
+
+    fit_markers(input_dir, ["HB"], force=True)
+    n_files_after_first = len(list(cache_dir.glob("sp_df_HB_*.csv")))
+
+    fit_markers(input_dir, ["HB"], force=False)
+    n_files_after_second = len(list(cache_dir.glob("sp_df_HB_*.csv")))
+
+    assert n_files_after_first == n_files_after_second == 1

@@ -1,6 +1,6 @@
 """Fig3 dx use case: fig3's non-cancer Kaplan-Meier panel.
 
-Reads the derived Dx table produced by `scripts.run_dx_incident`
+Reads the derived Dx table produced by `scripts.build_dx_incident`
 (`dx_incident.csv`) rather than re-deriving it -- run dx_incident first. This
 script will raise a clear error naming the expected path if that file isn't
 there yet -- unless `fig3_km_data.csv` is already cached in `output_dir` (see
@@ -18,13 +18,13 @@ Required inputs: `tests.csv` (anon_id, ts, test_code, result_value, sex) coverin
 the 8 fig3-KM markers (HB, TNEUT, ALB, ALT, MCV, P, GLU, K), and a Demographics
 table (anon_id, sex, birth_date, death_ts) -- see README.md. Reads
 its markers from the per-marker split built by
-`scripts.run_tests_by_marker` -- run that first (or use `run_all`,
+`scripts.build_splits_by_marker` -- run that first (or use `run_all`,
 which sequences it automatically); raises a clear FileNotFoundError with the command
 to run if it hasn't been built yet -- unless `fig3_km_data.csv` is already cached
 (see below), in which case the split is never even read.
 
 Run:
-    python -m scripts.run_fig3_dx --input-dir data --output-dir outputs/fig3_dx
+    python -m scripts.run_fig3_dx --input-dir data --output-dir data/outputs/fig3_dx
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from utils.cache import cache_or_compute  # noqa: E402
 from utils.io import load_demographics_csv, load_dx_incident  # noqa: E402
 from utils.logging_utils import tagged_stdout, timed_step  # noqa: E402
-from utils.setpoints import fit_markers_lazy  # noqa: E402
+from utils.setpoints import fit_markers  # noqa: E402
 from utils.clinical.get import attach_ref_intervals, compute_within_normal_mask  # noqa: E402
 from utils.clinical.run_clinical import (  # noqa: E402
     _fit_km_for_groups,
@@ -82,9 +82,9 @@ def build_fig3_km_data(*, input_dir: Path, dx_incident: pd.DataFrame) -> pd.Data
     demog_df["death_ts_filled"] = demog_df["death_ts"].fillna(pd.Timestamp.today())
 
     # force (this script's own fig3_km_data.csv cache) never cascades to the shared setpoint
-    # dependency -- that's run_setpoints_by_marker's job, not this script's.
+    # dependency -- that's build_setpoints's job, not this script's.
     with timed_step("fit_setpoints", f"Fitting setpoints for {len(FIG3_KM_MARKERS)} markers"):
-        sp_df = fit_markers_lazy(input_dir, FIG3_KM_MARKERS, force=False, label="fig3_dx")
+        sp_df = fit_markers(input_dir, FIG3_KM_MARKERS, force=False, label="fig3_dx")
 
     sp_df_demog = sp_df.merge(demog_df[[ID_COL, "birth_date", "death_ts_filled"]].drop_duplicates(), on=ID_COL, how="inner")
     n_before = len(sp_df_demog)
@@ -145,7 +145,7 @@ def build_fig3_km_data(*, input_dir: Path, dx_incident: pd.DataFrame) -> pd.Data
 def run(*, input_dir: Path, output_dir: Path, dx_incident_path: Path = None, force: bool = False) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     if dx_incident_path is None:
-        dx_incident_path = Path(__file__).resolve().parent.parent / "outputs" / "dx_incident" / "dx_incident.csv"
+        dx_incident_path = Path(__file__).resolve().parent.parent / "data" / "outputs" / "dx_incident" / "dx_incident.csv"
 
     def _compute_km_data() -> pd.DataFrame:
         dx_incident = load_dx_incident(dx_incident_path)
@@ -182,8 +182,8 @@ def run(*, input_dir: Path, output_dir: Path, dx_incident_path: Path = None, for
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run fig3's dx-anchored Kaplan-Meier panel.")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig3_dx")
-    parser.add_argument("--dx_incident_path", type=Path, default=None, help="Path to dx_incident.csv from `scripts.run_dx_incident`. Default: outputs/dx_incident/dx_incident.csv")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig3_dx")
+    parser.add_argument("--dx_incident_path", type=Path, default=None, help="Path to dx_incident.csv from `scripts.build_dx_incident`. Default: data/outputs/dx_incident/dx_incident.csv")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 

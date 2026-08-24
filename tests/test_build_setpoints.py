@@ -1,4 +1,4 @@
-"""Tests for scripts/run_setpoints_by_marker.py.
+"""Tests for scripts/build_setpoints.py.
 
 Not a hard prerequisite the way tests_by_marker/dx_incident are -- compute_sp_df's own
 per-marker caching means fig3_hazard/fig3_dx/fig4_dx_cases still fit inline fine without
@@ -10,9 +10,9 @@ import pandas as pd
 import pytest
 
 import utils.setpoints as setpoints_module
-from scripts.run_setpoints_by_marker import run
-from scripts.run_tests_by_marker import build_tests_by_marker
-from utils.setpoints import is_fitted_canonical
+from scripts.build_setpoints import run
+from scripts.build_splits_by_marker import build_splits_by_marker
+from utils.setpoints import is_fitted_full_population
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +27,7 @@ def _write_isolated_tests_csv(input_dir, test_codes):
 
 
 def test_run_fits_requested_markers_and_warms_shared_cache(tmp_path, monkeypatch):
-    import scripts.run_setpoints_by_marker as m
+    import scripts.build_setpoints as m
 
     monkeypatch.setattr(m, "TESTCODES_LIST", ["HB", "GLU"])
 
@@ -35,7 +35,7 @@ def test_run_fits_requested_markers_and_warms_shared_cache(tmp_path, monkeypatch
     input_dir.mkdir()
     output_dir = tmp_path / "out"
     _write_isolated_tests_csv(input_dir, ["HB", "GLU"])
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
     manifest = run(input_dir=input_dir, output_dir=output_dir, force=True)
 
@@ -43,17 +43,17 @@ def test_run_fits_requested_markers_and_warms_shared_cache(tmp_path, monkeypatch
     assert manifest["n_markers_fitted"] == 2
     assert (output_dir / "manifest.json").exists()
 
-    # The whole point: compute_sp_df's canonical cache is now warm for a later,
+    # The whole point: compute_sp_df's full_population cache is now warm for a later,
     # independent caller (e.g. fig5_iron_infusion) to reuse without loading tests_df.
-    assert is_fitted_canonical("HB") is True
-    assert is_fitted_canonical("GLU") is True
+    assert is_fitted_full_population("HB") is True
+    assert is_fitted_full_population("GLU") is True
 
 
 def test_marker_arg_restricts_to_just_that_marker(tmp_path, monkeypatch):
     """--marker must fit only the requested marker, leaving every other TESTCODES_LIST
     marker's setpoint cache untouched -- e.g. to refresh just NA after a loader fix,
     without re-fitting all 43 markers."""
-    import scripts.run_setpoints_by_marker as m
+    import scripts.build_setpoints as m
 
     monkeypatch.setattr(m, "TESTCODES_LIST", ["HB", "GLU"])
 
@@ -61,14 +61,14 @@ def test_marker_arg_restricts_to_just_that_marker(tmp_path, monkeypatch):
     input_dir.mkdir()
     output_dir = tmp_path / "out"
     _write_isolated_tests_csv(input_dir, ["HB", "GLU"])
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
     manifest = run(input_dir=input_dir, output_dir=output_dir, force=True, markers=["HB"])
 
     assert manifest["n_markers_requested"] == 1
     assert manifest["n_markers_fitted"] == 1
-    assert is_fitted_canonical("HB") is True
-    assert is_fitted_canonical("GLU") is False  # never requested, never fit
+    assert is_fitted_full_population("HB") is True
+    assert is_fitted_full_population("GLU") is False  # never requested, never fit
 
 
 def test_marker_arg_rejects_marker_not_in_testcodes_list(tmp_path):

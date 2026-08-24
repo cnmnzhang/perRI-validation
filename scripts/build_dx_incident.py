@@ -4,13 +4,13 @@ Collapses row-level ICD9/ICD10 diagnosis events (one row per diagnosis per
 visit) into dx_incident.csv -- one row per (patient, diagnosis) with the
 earliest ("incident") date that diagnosis appears. fig3_dx and fig4_dx_cases
 both read this output rather than re-deriving it (run dx_incident first:
-python -m scripts.run_dx_incident).
+python -m scripts.build_dx_incident).
 
 Required inputs: a Dx table (anon_id, icd9, icd10, diagnosis_ts) -- see
 README.md.
 
 Run:
-    python -m scripts.run_dx_incident --input-dir data --output-dir outputs/dx_incident
+    python -m scripts.build_dx_incident --input-dir data --output-dir data/outputs/dx_incident
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False) -> dict:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run the dx_incident use case (derived incident-diagnosis table).")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "dx_incident")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "dx_incident")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 

@@ -38,51 +38,12 @@ def _validate_columns(df: pd.DataFrame, schema: TableSchema) -> None:
 def _read_csv_no_default_na(path: Union[str, Path], dtype: dict) -> pd.DataFrame:
     """pd.read_csv with pandas' default NA-string sniffing disabled.
 
-    Several legitimate values in this schema collide with pandas' default
-    na_values list -- most importantly the marker code "NA" (sodium), which
-    pandas otherwise silently reads as a missing value (then a naive dropna
-    on that column deletes every sodium row). Callers that need NaN handling
-    for numeric/date columns already coerce explicitly afterward
-    (pd.to_numeric/pd.to_datetime with errors="coerce"), so disabling the
-    global sniffing is safe.
+    "NA" (sodium)" in this schema collide with pandas' default
+    na_values list. Callers that need NaN handling
+    for numeric/date columns will coerce explicitly afterward
+    (pd.to_numeric/pd.to_datetime with errors="coerce")
     """
     return pd.read_csv(path, dtype=dtype, keep_default_na=False, na_values=[])
-
-
-_GENERIC_SOURCE_FILE = "all_tests_cbc_bmp_merged.pkl"
-
-
-def _drop_redundant_generic_source_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Some markers (e.g. the Hepatic panel, TSH) are captured by more than one raw
-    export -- once as a battery-specific merged file, and again because the same real
-    draw is also bundled into the generic CBC/BMP export. bayesian-setpoint-inference's
-    own loader (utils/data_preprocess.py:load_marker) never has this problem: it's an
-    if/elif chain that reads exactly one canonical source file per marker (specialty
-    battery file if the marker has one, the generic CBC/BMP file otherwise) -- it never
-    merges sources for a single marker.
-
-    Without this, a marker present in two sources gets each real encounter recorded
-    twice, a few hours apart (one timestamp per source) rather than once -- which
-    isn't caught by the exact-duplicate drop below (different timestamps, same draw)
-    and silently defeats the 90-day isolation filter: each duplicate is "too close" to
-    its own twin, so both get excluded as non-isolated even though the real encounter
-    is isolated. Confirmed on real data: one patient's 16 genuinely isolated ALB
-    encounters over a decade collapsed to 3 isolated points with the duplicate present,
-    and recovered to 16 once the duplicate row was dropped.
-
-    Mirrors load_marker's preference (specialty source over the generic default) by
-    dropping the generic-source rows for any test_code that also has rows from a
-    non-generic source -- without hardcoding which markers or specialty filenames are
-    affected, so this stays correct if the raw exports' marker coverage changes.
-    """
-    if "source_file" not in df.columns:
-        return df
-    has_specialty_source = df.groupby(TEST_CODE_COL)["source_file"].transform(lambda s: (s != _GENERIC_SOURCE_FILE).any())
-    is_redundant_generic_row = has_specialty_source & (df["source_file"] == _GENERIC_SOURCE_FILE)
-    dropped = int(is_redundant_generic_row.sum())
-    if dropped:
-        print(f"[io] dropping {dropped:,} rows from '{_GENERIC_SOURCE_FILE}' for markers that also have a specialty source (see _drop_redundant_generic_source_rows)")
-    return df[~is_redundant_generic_row]
 
 
 def resolve_tests_csv_path(input_dir: Union[str, Path]) -> Path:
@@ -106,17 +67,12 @@ def load_tests_csv(path: Union[str, Path]) -> pd.DataFrame:
     size_mb = path.stat().st_size / 1e6 if path.exists() else 0
     verbose = size_mb >= _PRINT_THRESHOLD_MB
     if verbose:
-        print(f"[io] reading {path} ({size_mb:,.0f} MB)...")
+        print(f"reading {path} ({size_mb:,.0f} MB)...")
         t0 = time.time()
 
     df = _read_csv_no_default_na(path, {ID_COL: str, TEST_CODE_COL: str, SEX_COL: str})
     _validate_columns(df, TESTS_SCHEMA)
-    df = _drop_redundant_generic_source_rows(df)
-    # A blank test_code is the sodium marker "NA" -- some upstream export step read it
-    # with pandas' default NA-string sniffing (the same trap _read_csv_no_default_na
-    # guards against here), turned it into a real NaN, and wrote that back out as an
-    # empty cell. Restored here so every downstream split/fit sees "NA" like any other
-    # marker, rather than losing the marker's rows or grouping them under "".
+    # A blank test_code is the sodium marker "NA"
     df.loc[df[TEST_CODE_COL] == "", TEST_CODE_COL] = "NA"
     df[TS_COL] = pd.to_datetime(df[TS_COL], errors="coerce")
     df[MEASUREMENT_COL] = pd.to_numeric(df[MEASUREMENT_COL], errors="coerce")
@@ -127,17 +83,11 @@ def load_tests_csv(path: Union[str, Path]) -> pd.DataFrame:
     # anon_id and loads demographics separately; passing extras through leaks them into
     # derived caches and figure-data artifacts.
     df = df[list(TESTS_SCHEMA.required_columns)]
-    # Exact-duplicate rows (same patient/timestamp/marker/value) are a real upstream export
-    # artifact, not repeat measurements -- some markers (TSH/T4FR) are ~85% duplicated this
-    # way, which silently defeats perri's isolation filter (every row has a same-timestamp
-    # "neighbor," so almost nothing reads as isolated regardless of how spread out the
-    # patient's real visits are). Dropped here so every downstream split/fit sees each real
-    # measurement once.
     df = df.drop_duplicates(subset=[ID_COL, TS_COL, TEST_CODE_COL, MEASUREMENT_COL])
     df = df.sort_values([ID_COL, TS_COL]).reset_index(drop=True)
 
     if verbose:
-        print(f"[io] read {path}: {len(df):,} rows in {time.time() - t0:.1f}s")
+        print(f"read {path}: {len(df):,} rows in {time.time() - t0:.1f}s")
     return df
 
 
@@ -149,13 +99,10 @@ def tests_by_marker_dir(input_dir: Union[str, Path, None]) -> Path:
 
 
 
-
 def load_tests_marker_subset(input_dir: Union[str, Path] = None, test_codes: list=None) -> pd.DataFrame:
-    """Loads just `test_codes` from the split built by scripts/run_tests_by_marker.py.
-
-    Unlike the earlier design, this never builds the split itself -- it's a pure
-    loader. Raises a clear FileNotFoundError naming the command to run if
-    `scripts.run_tests_by_marker` hasn't been run yet, the same way
+    """Loads `test_codes` from the split built by scripts/build_splits_by_marker.py.
+    Raises a clear FileNotFoundError naming the command to run if
+    `scripts.build_splits_by_marker` hasn't been run yet, the same way
     load_dx_incident does for dx_incident.csv.
     """
     marker_dir = tests_by_marker_dir(input_dir)
@@ -163,7 +110,7 @@ def load_tests_marker_subset(input_dir: Union[str, Path] = None, test_codes: lis
     if not sentinel_path.exists():
         raise FileNotFoundError(
             f"Expected the per-marker Tests split at {marker_dir}, but it doesn't exist. Run it first: "
-            f"python -m scripts.run_tests_by_marker --input-dir {input_dir}"
+            f"python -m scripts.build_splits_by_marker --input-dir {input_dir}"
         )
     frames = [load_tests_csv(marker_dir / f"{test_code}.csv") for test_code in test_codes if (marker_dir / f"{test_code}.csv").exists()]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[ID_COL, TS_COL, TEST_CODE_COL, MEASUREMENT_COL, SEX_COL])
@@ -173,7 +120,7 @@ def load_dx_csv(path: Union[str, Path], verbose: bool = True) -> pd.DataFrame:
     path = Path(path)
     if verbose:
         size_mb = path.stat().st_size / 1e6 if path.exists() else 0
-        print(f"[io] reading {path} ({size_mb:,.0f} MB)...")
+        print(f"reading {path} ({size_mb:,.0f} MB)...")
         t0 = time.time()
 
     df = _read_csv_no_default_na(path, {ID_COL: str, ICD9_COL: str, ICD10_COL: str})
@@ -185,7 +132,7 @@ def load_dx_csv(path: Union[str, Path], verbose: bool = True) -> pd.DataFrame:
     df[ICD10_COL] = df[ICD10_COL].replace("", pd.NA)
 
     if verbose:
-        print(f"[io] read {path}: {len(df):,} rows in {time.time() - t0:.1f}s")
+        print(f"read {path}: {len(df):,} rows in {time.time() - t0:.1f}s")
     return df
 
 
@@ -208,9 +155,9 @@ def load_iron_mar_csv(path: Union[str, Path]) -> pd.DataFrame:
 
 
 def load_dx_incident(path: Union[str, Path]) -> pd.DataFrame:
-    """Loads the derived Dx table produced by `scripts.run_dx_incident`.
+    """Loads the derived Dx table produced by `scripts.build_dx_incident`.
 
-    Raises a clear, actionable error if dx_incident hasn't been run yet -- fig3_dx
+    Raises error if dx_incident hasn't been run yet -- fig3_dx
     and fig4_dx_cases do not re-derive dx_incident themselves, both to avoid recomputing
     the ICD prefix matching twice and so the scripts can't silently drift apart.
     """
@@ -218,7 +165,7 @@ def load_dx_incident(path: Union[str, Path]) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(
             f"Expected the derived Dx table at {path}, but it doesn't exist. Run dx_incident first: "
-            f"python -m scripts.run_dx_incident --input-dir <input_dir> --output-dir {path.parent}"
+            f"python -m scripts.build_dx_incident --input-dir <input_dir> --output-dir {path.parent}"
         )
     dx_incident = pd.read_csv(path, dtype={ID_COL: str})
     dx_incident["earliest_contact_date"] = pd.to_datetime(dx_incident["earliest_contact_date"], errors="coerce")

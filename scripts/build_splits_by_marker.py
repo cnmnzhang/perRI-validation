@@ -10,7 +10,7 @@ analysis script that happens to touch it first.
 Required inputs: `tests.csv` or `tests.csv.gz` -- see README.md.
 
 Run:
-    python -m scripts.run_tests_by_marker --input-dir data --output-dir outputs/tests_by_marker
+    python -m scripts.build_splits_by_marker --input-dir data --output-dir data/outputs/tests_by_marker
 """
 
 from __future__ import annotations
@@ -48,11 +48,11 @@ def _write_marker_csvs_parallel(groups: list, marker_dir: Path) -> dict:
         for i, future in enumerate(as_completed(futures), 1):
             test_code, n_rows, elapsed = future.result()
             manifest[test_code] = n_rows
-            print(f"[io] [{i}/{n_markers_total}] {test_code}: {n_rows:,} rows written ({elapsed:.1f}s)")
+            print(f"[{i}/{n_markers_total}] {test_code}: {n_rows:,} rows written ({elapsed:.1f}s)")
     return manifest
 
 
-def build_tests_by_marker(input_dir: Union[str, Path], force: bool = False, markers: list = None) -> dict:
+def build_splits_by_marker(input_dir: Union[str, Path], force: bool = False, markers: list = None) -> dict:
     """Split the master Tests table into one CSV per marker.
 
     The full split is existence-cached by `_split_complete.json`. Passing `markers`
@@ -63,25 +63,25 @@ def build_tests_by_marker(input_dir: Union[str, Path], force: bool = False, mark
 
     if markers is not None:
         if not sentinel_path.exists():
-            raise FileNotFoundError(f"Expected the full split to already exist at {marker_dir} before refreshing individual markers {markers} -- run the full split first: python -m scripts.run_tests_by_marker --input-dir {input_dir}")
-        print(f"[io] tests_by_marker/ refreshing {len(markers)} marker(s): {', '.join(markers)}...")
+            raise FileNotFoundError(f"Expected the full split to already exist at {marker_dir} before refreshing individual markers {markers} -- run the full split first: python -m scripts.build_splits_by_marker --input-dir {input_dir}")
+        print(f"tests_by_marker/ refreshing {len(markers)} marker(s): {', '.join(markers)}...")
         tests_df = load_tests_csv(resolve_tests_csv_path(input_dir))
         groups = [(test_code, tests_df[tests_df[TEST_CODE_COL] == test_code]) for test_code in markers]
         manifest = json.loads(sentinel_path.read_text())
         manifest.update(_write_marker_csvs_parallel(groups, marker_dir))
         sentinel_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        print(f"[io] tests_by_marker/ refresh complete: {len(markers)} marker(s)")
+        print(f"tests_by_marker/ refresh complete: {len(markers)} marker(s)")
         return manifest
 
     if sentinel_path.exists() and not force:
         return json.loads(sentinel_path.read_text())
 
-    print("[io] tests_by_marker/ cache miss -- splitting the master Tests table into one file per marker (one-time cost, shared by every analysis)...")
+    print("tests_by_marker/ cache miss -- splitting the master Tests table into one file per marker (one-time cost, shared by every analysis)...")
     tests_df = load_tests_csv(resolve_tests_csv_path(input_dir))
     marker_dir.mkdir(parents=True, exist_ok=True)
     manifest = _write_marker_csvs_parallel(list(tests_df.groupby(TEST_CODE_COL)), marker_dir)
     sentinel_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    print(f"[io] tests_by_marker/ split complete: {len(manifest)} markers")
+    print(f"tests_by_marker/ split complete: {len(manifest)} markers")
     return manifest
 
 
@@ -90,7 +90,7 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False, markers: list
 
     step_label = f"Refreshing {len(markers)} marker(s)" if markers else "Splitting the master Tests table into one file per marker"
     with timed_step("tests_by_marker", step_label):
-        marker_manifest = build_tests_by_marker(input_dir, force=force, markers=markers)
+        marker_manifest = build_splits_by_marker(input_dir, force=force, markers=markers)
 
     manifest = {
         "input_dir": str(input_dir),
@@ -107,7 +107,7 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False, markers: list
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Split the master Tests table into one file per marker.")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "tests_by_marker")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "tests_by_marker")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--marker", action="append", dest="markers", help="Refresh just this marker's split file, leaving every other marker's file untouched (repeatable). Requires the full split to already exist. Default: full split.")
     args = parser.parse_args(argv)

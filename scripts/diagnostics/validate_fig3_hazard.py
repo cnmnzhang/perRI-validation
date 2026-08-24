@@ -8,7 +8,7 @@ and tests/test_ground_truth_check.py, which stay maintainer-only) so external va
 their own side-by-side check against fig3's ground truth. data/UWM/fig3_hazard/ is shipped for
 the same reason; data/UWM/'s other subdirectories (fig4, fig5, setpoints, ...) are not.
 
-Run (after scripts.run_fig3_hazard has produced outputs/fig3_hazard/fig3a_hr_by_model.csv):
+Run (after scripts.run_fig3_hazard has produced data/outputs/fig3_hazard/fig3a_hr_by_model.csv):
     python -m scripts.diagnostics.validate_fig3_hazard
 """
 
@@ -30,9 +30,9 @@ from scripts.run_fig3_hazard import _hr_by_model_df_to_cox_summary  # noqa: E402
 from utils.visuals_fig3 import fig3hr  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-VALIDATION_PATH = ROOT / "outputs" / "fig3_hazard" / "fig3a_hr_by_model.csv"
+VALIDATION_PATH = ROOT / "data" / "outputs" / "fig3_hazard" / "fig3a_hr_by_model.csv"
 UWM_PATH = ROOT / "data" / "UWM" / "fig3_hazard" / "fig3a_hr_by_model.csv"
-SAVE_PATH = ROOT / "outputs" / "fig3_hazard" / "validate_fig3_hazard_uwm_vs_validation.svg"
+SAVE_PATH = ROOT / "data" / "outputs" / "fig3_hazard" / "validate_fig3_hazard_uwm_vs_validation.svg"
 VARIABLES = (MU, CV_COL)
 
 

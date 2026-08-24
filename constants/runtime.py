@@ -66,7 +66,7 @@ RANDOM_SEED = 42
 N_JOBS = 3
 
 # compute_sp_df's default minimum isolated measurements per patient to fit a setpoint --
-# shared with is_fitted/is_fitted_canonical so their cache-key lookups match what
+# shared with is_fitted/is_fitted_full_population so their cache-key lookups match what
 # compute_sp_df actually cached under, without both sides having to be kept in sync by hand.
 DEFAULT_MIN_MEASUREMENTS = 3
 

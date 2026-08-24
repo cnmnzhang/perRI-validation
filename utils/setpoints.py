@@ -50,7 +50,7 @@ def cache_or_compute(name: str, compute_fn, force: bool = False, file_format: st
     return _cache_or_compute(CACHE_DIR / name, compute_fn, force=force, file_format=file_format)
 
 
-def _grid_bounds_from_pop_ri(low: float, high: float) -> dict:
+def _grid_bounds_from_pop_ri(low: float, high: float, log_space: bool = False) -> dict:
     """Derive min_mu/max_mu/min_sigma/max_sigma from a population reference interval.
 
     Reproduces the original pipeline's utils/get.py:expanded_ref_interval + popRR
@@ -63,10 +63,18 @@ def _grid_bounds_from_pop_ri(low: float, high: float) -> dict:
 
     This is what makes editing pop_ri in constants/marker_config.py actually
     change what perri fits with -- see README.md's "Adapting to a different population".
+
+    log_space=True means (low, high) are already log-space bounds (see
+    _params_override) and min_mu is a log-space location parameter -- expected to
+    go negative for any marker whose raw magnitude is below 1 (log(0.1) < 0), so
+    unlike the raw-space case it is NOT floored at SMALL_VALUE. Matches the live
+    pipeline's utils/get.py:get_log_model_constants.
     """
     ref_size = high - low
     center = (high + low) / 2
-    min_mu = max(SMALL_VALUE, center - 2 * ref_size)
+    min_mu = center - 2 * ref_size
+    if not log_space:
+        min_mu = max(SMALL_VALUE, min_mu)
     max_mu = center + 2 * ref_size
     max_sigma = ref_size / (2.0 * 1.96)
     return {"min_mu": min_mu, "max_mu": max_mu, "min_sigma": SMALL_VALUE, "max_sigma": max_sigma}
@@ -102,8 +110,13 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
 
     log_space=True (for utils.log_transform_markers.LOG_TRANSFORM_MARKERS) log-
     transforms the resolved (low, high) bounds before deriving the grid, matching
-    the live pipeline's utils/get.py:get_log_model_constants -- clipped at 1e-6
-    the same way it clips there, since pop_ri lower bounds are sometimes exactly 0.
+    the live pipeline's utils/get.py:get_log_model_constants. pop_ri lower bounds
+    are sometimes exactly 0 (e.g. HSCRP, BILD), where log(low) is undefined; rather
+    than clipping at an arbitrary raw-space floor (1e-6, which logs to ~-13.8 and
+    has nothing to do with the marker's real smallest values -- confirmed to break
+    BILD/HSCRP's fitted mu and CV on real data), anchor log_lo symmetrically at
+    log_hi - 4.0, the same +/-4-log-unit span _grid_bounds_from_pop_ri already
+    implies via its 2x-ref_size expansion.
     """
     params = get_default_params(test_code, sex=sex)
     low, high = popRI(sex=sex, test_code=test_code)
@@ -112,8 +125,10 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
         return params
     low, high = bounds
     if log_space:
-        low, high = math.log(max(low, 1e-6)), math.log(max(high, 1e-6))
-    params.update(_grid_bounds_from_pop_ri(low, high))
+        log_hi = math.log(max(high, 1e-6))
+        log_lo = math.log(low) if low > 0 else log_hi - 4.0
+        low, high = log_lo, log_hi
+    params.update(_grid_bounds_from_pop_ri(low, high, log_space=log_space))
     return params
 
 
@@ -149,6 +164,7 @@ def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_m
     )
     if fitted.empty or not log_space:
         return fitted
+    # use the original raw measurement for each (patient, timestamp) instead of the log-transformed one
     raw_lookup = df.rename(columns={ID_COL: "patient_id", TS_COL: "timestamp", MEASUREMENT_COL: "value"})[["patient_id", "timestamp", "value"]]
     fitted = fitted.drop(columns=["value"]).merge(raw_lookup, on=["patient_id", "timestamp"], how="left")
     fitted["sigma"] = np.exp(fitted["mu"]) * np.sqrt(np.exp(fitted["sigma"] ** 2) - 1)
@@ -185,21 +201,21 @@ def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_
 def is_fitted(tests_df: pd.DataFrame, test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
     """Whether compute_sp_df(tests_df, test_code, min_measurements=...) is already cached --
     without fitting anything. `tests_df` need not be pre-filtered to test_code."""
-    df = tests_df[tests_df["test_code"] == test_code]
+    df = tests_df[tests_df[TEST_CODE_COL] == test_code]
     if df.empty:
         return False
     return (CACHE_DIR / _cache_name_for(df, test_code, min_measurements)).exists()
 
 
-def _canonical_cache_name(test_code: str, min_measurements: int) -> str:
+def _full_population_cache_name(test_code: str, min_measurements: int) -> str:
     """The cache filename for a marker's full, unfiltered population -- no content-hash
     fingerprint, just test_code + min_measurements. Only valid when the caller trusts
     tests_df (when supplied) is that marker's whole tests_by_marker split with no cohort
     filtering; unlike _cache_name_for's fingerprint, this can't detect on its own that
     tests.csv changed underneath it -- delete data/cache/, or pass force=True, after it does.
 
-    The point: checking is_fitted_canonical needs only test_code, not a loaded/hashed
-    DataFrame, so a caller fitting many markers (fit_markers_lazy) can skip loading a
+    The point: checking is_fitted_full_population needs only test_code, not a loaded/hashed
+    DataFrame, so a caller fitting many markers (fit_markers) can skip loading a
     marker's multi-hundred-MB CSV split entirely when it's already fitted.
 
     Also embeds a `_log` suffix when is_log_transform(test_code) -- see _cache_name_for's
@@ -209,54 +225,33 @@ def _canonical_cache_name(test_code: str, min_measurements: int) -> str:
     return f"sp_df_{test_code}_full_m{min_measurements}{log_suffix}.csv"
 
 
-def is_fitted_canonical(test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
-    """Whether the marker's canonical (full-population) cache file already exists --
+def is_fitted_full_population(test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
+    """Whether the marker's full-population cache file already exists --
     no tests_df needed at all, unlike is_fitted."""
-    return (CACHE_DIR / _canonical_cache_name(test_code, min_measurements)).exists()
+    return (CACHE_DIR / _full_population_cache_name(test_code, min_measurements)).exists()
 
 
-def fit_markers(tests_df: pd.DataFrame, test_codes: list, *, force: bool = False, min_measurements: int = DEFAULT_MIN_MEASUREMENTS, label: str = "setpoints") -> pd.DataFrame:
+def fit_markers(input_dir, test_codes: list, *, force: bool = False, min_measurements: int = DEFAULT_MIN_MEASUREMENTS, label: str = "setpoints") -> pd.DataFrame:
     """Fits every marker in test_codes via compute_sp_df, in order, skipping (not aborting
     the whole run for) a marker with no/insufficient data or an unexpected fit failure (a bad
-    pop_ri, a malformed row, ...). Shared by
-    scripts.run_setpoints_by_marker (explicit pre-fit stage covering all of
-    TESTCODES_LIST) and run_fig3_hazard (which needs the same 43 markers fit either way,
-    whether or not the shared stage already warmed the cache).
-    """
-    sp_frames = []
-    for i, test_code in enumerate(test_codes, 1):
-        n_patients = tests_df.loc[tests_df["test_code"] == test_code, ID_COL].nunique()
-        t0 = time.time()
-        try:
-            sp = compute_sp_df(tests_df, test_code=test_code, force=force, min_measurements=min_measurements)
-        except Exception as exc:
-            print(f"{label}: [{i}/{len(test_codes)}] {test_code}: SKIPPED, fit failed: {exc}")
-            continue
-        print(f"{label}: [{i}/{len(test_codes)}] {test_code}: {n_patients:,} candidate patients -> {sp[ID_COL].nunique() if not sp.empty else 0:,} fitted ({time.time() - t0:.1f}s)")
-        sp_frames.append(sp)
-    non_empty = [f for f in sp_frames if not f.empty]
-    if not non_empty:
-        return pd.DataFrame(columns=SP_DF_COLUMNS)
-    return pd.concat(non_empty, ignore_index=True)
+    pop_ri, a malformed row, ...). Shared by scripts.build_setpoints (explicit pre-fit
+    stage covering all of TESTCODES_LIST), run_fig3_hazard, and run_fig3_dx.
 
-
-def fit_markers_lazy(input_dir, test_codes: list, *, force: bool = False, min_measurements: int = DEFAULT_MIN_MEASUREMENTS, label: str = "setpoints") -> pd.DataFrame:
-    """Like fit_markers, but loads a marker's Tests split off disk only when its canonical
-    cache isn't already there, instead of loading every marker's full split up front. Lets a
-    fully-warm cache (e.g. from a prior run_setpoints_by_marker) skip reading every
-    multi-hundred-MB per-marker CSV just to recheck a cache that's already known to exist --
-    the tradeoff being that a stale canonical cache isn't auto-detected the way fit_markers'
-    fingerprinted one is (see `_canonical_cache_name`).
+    Loads a marker's Tests split off disk only when its full_population cache isn't already there,
+    instead of loading every marker's full split up front. Lets a fully-warm cache (e.g. from
+    a prior build_setpoints) skip reading every multi-hundred-MB per-marker CSV just
+    to recheck a cache that's already known to exist -- the tradeoff being that a stale
+    full_population cache isn't auto-detected the way a fingerprinted one is (see `_full_population_cache_name`).
     """
     from utils.io import load_tests_marker_subset
 
     sp_frames = []
     for i, test_code in enumerate(test_codes, 1):
         t0 = time.time()
-        already_fitted = not force and is_fitted_canonical(test_code, min_measurements)
+        already_fitted = not force and is_fitted_full_population(test_code, min_measurements)
         tests_df = None if already_fitted else load_tests_marker_subset(input_dir, test_codes=[test_code])
         try:
-            sp = compute_sp_df(tests_df, test_code=test_code, force=force, min_measurements=min_measurements, canonical=True)
+            sp = compute_sp_df(tests_df, test_code=test_code, force=force, min_measurements=min_measurements, full_population=True)
         except Exception as exc:
             print(f"{label}: [{i}/{len(test_codes)}] {test_code}: SKIPPED, fit failed: {exc}")
             continue
@@ -277,7 +272,7 @@ def compute_sp_df(
     min_measurements: int = DEFAULT_MIN_MEASUREMENTS,
     force: bool = False,
     n_jobs: int = N_JOBS,
-    canonical: bool = False,
+    full_population: bool = False,
     input_dir: "str | Path | None" = None,
 ) -> pd.DataFrame:
     """Compute setpoints for one marker from a generic Tests table, via perri.
@@ -285,44 +280,42 @@ def compute_sp_df(
     This is the expensive step (a Bayesian filter fit per patient) — the result
     is cached at data/cache/sp_df_<test_code>_<population_hash>_m<N>.csv,
     where population_hash is a content hash of the exact filtered input rows.
-    Re-running an analysis (or iterating on downstream cohort/plotting code)
+    Cases: 
+    - Re-running an analysis (or iterating on downstream cohort/plotting code)
     doesn't refit the model unless the input Tests rows for that marker actually
-    changed; fitting the same marker on two different populations (e.g. a full
+    changed
+    - fitting the same marker on two different populations (e.g. a full
     population vs. a cohort-filtered subset) produces two independent cache
     files rather than one clobbering the other.
 
-    Column names are not parameterized: utils/io.py's loaders
-    guarantee the Tests table always uses anon_id/ts/test_code/result_value/sex
-    (sex is a required column, not merged in from Demographics), so there's
-    nothing to vary here.
 
     Parameters
     ----------
     tests_df : Tests table (anon_id, ts, test_code, result_value, sex), already
         filtered or not — this function filters to `test_code` internally. May be
-        left as None when `canonical=True` and the cache already has this marker
-        (see `canonical` below) — it's only read on a cache miss.
+        left as None when `full_population=True` and the cache already has this marker
+        (see `full_population` below) — it's only read on a cache miss.
     test_code : marker to fit (e.g. "HB", "WBC").
     force : recompute even if a cached result exists.
-    canonical : use the marker's canonical, fingerprint-free cache file (see
-        `_canonical_cache_name`) instead of hashing tests_df. Only valid when
+    full_population : use the marker's full-population, fingerprint-free cache file (see
+        `_full_population_cache_name`) instead of hashing tests_df. Only valid when
         tests_df (when supplied) is that marker's whole, unfiltered population --
-        see `fit_markers_lazy`, which is the intended caller.
+        see `fit_markers`, which is the intended caller.
     input_dir : where to load `test_code`'s per-marker split from (via
-        load_tests_marker_subset) on a canonical cache miss when `tests_df` is
+        load_tests_marker_subset) on a full_population cache miss when `tests_df` is
         None. None resolves to the repo's default `data/` dir (see
         `tests_by_marker_dir`). Ignored when `tests_df` is supplied or the
-        canonical cache already hits.
+        full_population cache already hits.
 
     Returns
     -------
     DataFrame shaped like the internal pipeline's sp_df: columns
     [anon_id, test_code, model, ts, mu, sigma, result_value, sex, index].
     """
-    if canonical:
-        cache_name = _canonical_cache_name(test_code, min_measurements)
+    if full_population:
+        cache_name = _full_population_cache_name(test_code, min_measurements)
     else:
-        df = tests_df[tests_df["test_code"] == test_code]
+        df = tests_df[tests_df[TEST_CODE_COL] == test_code]
         if df.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)
         cache_name = _cache_name_for(df, test_code, min_measurements)
@@ -331,7 +324,7 @@ def compute_sp_df(
         nonlocal tests_df
         if tests_df is None:
             tests_df = load_tests_marker_subset(input_dir, test_codes=[test_code])
-        df = tests_df[tests_df["test_code"] == test_code].copy()
+        df = tests_df[tests_df[TEST_CODE_COL] == test_code].copy()
         if df.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)
 
@@ -363,7 +356,7 @@ def compute_sp_df(
         sex_lookup = df[[ID_COL, "sex"]].drop_duplicates(ID_COL)
         out = out.merge(sex_lookup, on=ID_COL, how="left")
 
-        out["test_code"] = test_code
+        out[TEST_CODE_COL] = test_code
         out["model"] = "bayesian"
         return out[SP_DF_COLUMNS]
 
@@ -374,12 +367,9 @@ def compute_sp_df(
         file_format="csv",
     )
     # cache_or_compute round-trips through CSV on a cache hit, which loses dtypes
-    # (ts comes back as a string) -- restore them so callers never have to care
-    # whether this was freshly computed or loaded from cache. test_code is set
-    # unconditionally (not just re-typed) because pandas' default NA-string
-    # sniffing on a bare read_csv (cache_or_compute's csv path has no dtype/
-    # na_values guard) turns the marker "NA" (sodium) into a real NaN
+    # (ts comes back as a string) 
+    # test_code is set unconditionally to avoid turning the marker "NA" (sodium) into NaN
     out[ID_COL] = out[ID_COL].astype(str)
     out[TS_COL] = pd.to_datetime(out[TS_COL])
-    out["test_code"] = test_code
+    out[TEST_CODE_COL] = test_code
     return out

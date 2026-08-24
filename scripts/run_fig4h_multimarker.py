@@ -42,7 +42,7 @@ from constants.runtime import (  # noqa: E402
     TEST_CODE_COL,
     TS_COL,
 )
-from scripts.run_tests_by_marker import build_tests_by_marker  # noqa: E402
+from scripts.build_splits_by_marker import build_splits_by_marker  # noqa: E402
 from utils.cache import cache_or_compute  # noqa: E402
 from utils.clinical.run_clinical import add_oo  # noqa: E402
 from utils.io import (  # noqa: E402
@@ -86,7 +86,7 @@ def _fifth_setpoints(input_dir: Path, markers: tuple[str, ...]) -> pd.DataFrame:
     frames = []
     for position, marker in enumerate(markers, 1):
         sp = compute_sp_df(tests_df=None, test_code=marker,
-                           canonical=True, force=False)
+                           full_population=True, force=False)
         fifth = sp[(sp[MODEL_COL] == "bayesian") & (sp[INDEX_COL] == 5)].copy()
         fifth = fifth.sort_values(TS_COL).drop_duplicates([ID_COL, TEST_CODE_COL], keep="first")
         fifth = fifth[[ID_COL, TEST_CODE_COL, TS_COL, MU, SIGMA, SEX_COL]]
@@ -479,7 +479,7 @@ def run(
 
     def _compute_rates() -> pd.DataFrame:
         with timed_step("fig4h", "Preparing the README raw inputs"):
-            build_tests_by_marker(input_dir)
+            build_splits_by_marker(input_dir)
             demographics = load_demographics_csv(input_dir / "demographics.csv")
 
         burden_frames = []
@@ -521,12 +521,8 @@ def run(
         panel_manifest_path.write_text(json.dumps(panel_manifest, indent=2, sort_keys=True) + "\n")
         return rates
 
-    # A rerun with an already-populated fig4h_rates.csv skips the whole cohort-building pass --
-    # per-marker setpoint loading/fitting, the presenting-panel washout joins, and streaming
-    # dx.csv for incident diagnoses -- since that's the expensive part once each marker's own
-    # compute_sp_df fit is already cached. Like fig3_dx's/fig4_dx_cases's own caches, this checks
-    # file existence only (not a content hash of tests.csv/dx.csv/demographics.csv) -- delete
-    # fig4h_rates.csv, or pass --force, after any of those change.
+    # A rerun with an already-populated fig4h_rates.csv skips the whole cohort-building pass 
+    # This is the only required data for figure generation
     with timed_step("fig4h", "Building multi-marker burden cohort and rates"):
         rates = cache_or_compute(rates_path, _compute_rates, force=force, file_format="csv")
 
@@ -560,7 +556,7 @@ def main(argv: list[str] | None = None) -> None:
         description="Replicate Fig. 4h multi-marker CBC/BMP burden heatmaps."
     )
     parser.add_argument("--input-dir", type=Path, default=repo_root / "data")
-    parser.add_argument("--output-dir", type=Path, default=repo_root / "outputs" / "fig4h_multimarker")
+    parser.add_argument("--output-dir", type=Path, default=repo_root / "data" / "outputs" / "fig4h_multimarker")
     parser.add_argument("--washout-days", type=int, default=365)
     parser.add_argument("--followup-days", type=int, default=365)
     parser.add_argument("--force", action="store_true")

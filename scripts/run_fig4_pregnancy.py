@@ -20,7 +20,7 @@ filter already matches the real pipeline's pre-pregnancy isolation logic
 exactly), not a pregnancy-specific model.
 
 Run:
-    python -m scripts.run_fig4_pregnancy --input-dir data --output-dir outputs/fig4_pregnancy
+    python -m scripts.run_fig4_pregnancy --input-dir data --output-dir data/outputs/fig4_pregnancy
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from utils.logging_utils import tagged_stdout, timed_step  # noqa: E402
 from utils.clinical.pregnancy import PAIR_SPECS, compute_inpreg_analysis_df, compute_prepreg_setpoint_table, select_trimester_midpoints, task1_setpoint_distribution, task1_summary_df, task2_results_df, task3_payload
 from constants.fig_config import A4_WIDTH, FIG4_ROW1_HEIGHT
 from utils.visuals_fig4_pregnancy import plot_task1_on_ax, plot_task2_on_ax, plot_task3_on_ax
-from utils.visuals_shared import add_panel_label, save_fig_as_svg
+from utils.visuals_shared import save_fig_as_svg
 from constants.runtime import ID_COL  # noqa: E402
 
 PREGNANCY_LABS_FILE = "pregnancy_labs.csv"
@@ -119,9 +119,6 @@ def plot_mosaic(bundles: dict, path: Path) -> None:
         squeeze=False,
         gridspec_kw={"width_ratios": _COL_RATIOS, "wspace": 0.7, "hspace": 0.8},
     )
-    for col, label in enumerate(["e", "f", "g"]):
-        add_panel_label(axes[0, col], label, x=-0.4, y=1.3)
-
     for row_idx, pair in enumerate(pairs):
         bundle = bundles[pair.key]
         plot_task1_on_ax(axes[row_idx, 0], bundle["task1_df"], pair, task1_setpoint_distribution(bundle["setpoint_table"]), legend=True, labelx=True)
@@ -144,6 +141,8 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False) -> dict:
     for pair in PAIR_SPECS.values():
         with timed_step(pair.key, f"Building {pair.title} ({pair.test_code} -> {pair.outcome_col}) cohort"):
             bundles[pair.key] = build_pair_bundle(tests_df, demog_df, pair, force=force)
+            # print the size of the analysis_df for each pair
+            print(f"[{pair.key}] analysis_df: {len(bundles[pair.key]['analysis_df'])} rows, {len(bundles[pair.key]['analysis_df'][ID_COL].unique())} unique patients")
 
     for pair in PAIR_SPECS.values():
         bundle = bundles[pair.key]
@@ -179,7 +178,7 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False) -> dict:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run fig4's pregnancy panel.")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig4_pregnancy")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig4_pregnancy")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 

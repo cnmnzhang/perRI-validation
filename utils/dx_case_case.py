@@ -17,11 +17,11 @@ whose baseline is entirely inside PopRI rank first; within that, sort by
 larger |delta|, then |delta/sigma|.
 
 Usage:
-    python -m scripts.run_fig4_dx_cases_case --outcome leukemia
-    python -m scripts.run_fig4_dx_cases_case --outcome aki --n 12
-    python -m scripts.run_fig4_dx_cases_case --outcome leukemia --group all
-    python -m scripts.run_fig4_dx_cases_case --outcome hypothyroidism --group d
-    python -m scripts.run_fig4_dx_cases_case --outcome leukemia --accept 2
+    python -m utils.dx_case_case --outcome leukemia
+    python -m utils.dx_case_case --outcome aki --n 12
+    python -m utils.dx_case_case --outcome leukemia --group all
+    python -m utils.dx_case_case --outcome hypothyroidism --group d
+    python -m utils.dx_case_case --outcome leukemia --accept 2
 """
 
 from __future__ import annotations
@@ -62,15 +62,12 @@ KM_GROUPS = {
     "c": "pop_out & per_in  [Cleared -- abnormal by PopRI, normal by PerRI]",
     "d": "pop_out & per_out [Concordant Positive -- both abnormal]",
 }
-GROUP_CHOICES = ["a", "b", "c", "d", "all"]
-OUTCOME_CHOICES = ["all", *OUTCOME_REGISTRY.keys()]
-
 DEMOGRAPHICS_FILE = "demographics.csv"
 
 
 def _load_outcome_data(outcome_name: str, *, input_dir: Path, output_dir: Path, force: bool):
     """Reuses compute_one_outcome's cohort/setpoint cache instead of re-deriving it."""
-    dx_incident_path = Path(__file__).resolve().parent.parent / "outputs" / "dx_incident" / "dx_incident.csv"
+    dx_incident_path = Path(__file__).resolve().parent.parent / "data" / "outputs" / "dx_incident" / "dx_incident.csv"
     dx_incident = load_dx_incident(dx_incident_path)
     demographics_df = load_demographics_csv(input_dir / DEMOGRAPHICS_FILE)
     spec = compute_one_outcome(outcome_name, input_dir=input_dir, dx_incident=dx_incident, demographics_df=demographics_df, output_dir=output_dir, force=force)
@@ -139,7 +136,7 @@ def _print_ranked_cases(candidates: pd.DataFrame, outcome_name: str, n: int = 20
         print(f"  #{i:>2}  {baseline:>6}  {da_str}  {z_str}  {d_str}  {dte_str}  {patient_id}{marker}")
 
     print(f"\n  To save a case, re-run with --accept N")
-    print(f"  e.g.:  python -m scripts.run_fig4_dx_cases_case --outcome {outcome_name} --accept 1")
+    print(f"  e.g.:  python -m utils.dx_case_case --outcome {outcome_name} --accept 1")
     print(f"{'-'*60}\n")
 
 
@@ -201,11 +198,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Inspect and select example patients for fig4_dx_cases' trajectory panel.",
         epilog="""
 Examples:
-  python -m scripts.run_fig4_dx_cases_case --outcome leukemia
-  python -m scripts.run_fig4_dx_cases_case --outcome aki --n 12
-  python -m scripts.run_fig4_dx_cases_case --outcome leukemia --group all --no-events-only
-  python -m scripts.run_fig4_dx_cases_case --outcome hypothyroidism --group d
-  python -m scripts.run_fig4_dx_cases_case --outcome leukemia --accept 2
+  python -m utils.dx_case_case --outcome leukemia
+  python -m utils.dx_case_case --outcome aki --n 12
+  python -m utils.dx_case_case --outcome leukemia --group all --no-events-only
+  python -m utils.dx_case_case --outcome hypothyroidism --group d
+  python -m utils.dx_case_case --outcome leukemia --accept 2
 
 Groups: a=concordant-neg (pop_in&per_in), b=subclinical (pop_in&per_out) [default],
         c=cleared (pop_out&per_in), d=concordant-pos (pop_out&per_out)
@@ -213,9 +210,9 @@ Groups: a=concordant-neg (pop_in&per_in), b=subclinical (pop_in&per_out) [defaul
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig4_dx_cases")
-    parser.add_argument("--outcome", choices=OUTCOME_CHOICES, default=list(OUTCOME_REGISTRY.keys())[0])
-    parser.add_argument("--group", choices=GROUP_CHOICES, default="b", help="KM group to inspect: a=concordant-neg, b=subclinical (default), c=cleared, d=concordant-pos.")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig4_dx_cases")
+    parser.add_argument("--outcome", choices=["all", *OUTCOME_REGISTRY.keys()], default=list(OUTCOME_REGISTRY.keys())[0])
+    parser.add_argument("--group", choices=[*KM_GROUPS.keys(), "all"], default="b", help="KM group to inspect: a=concordant-neg, b=subclinical (default), c=cleared, d=concordant-pos.")
     parser.add_argument("--n", type=int, default=None, help="Number of cases to plot.")
     parser.add_argument("--ncols", type=int, default=3, help="Grid columns.")
     parser.add_argument("--no-events-only", dest="events_only", action="store_false", default=True, help="Include patients without a diagnosis event.")

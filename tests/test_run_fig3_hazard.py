@@ -53,7 +53,7 @@ def _seed_hr_by_baseline(path):
 
 def test_cached_plot_data_skips_setpoint_fitting_entirely(tmp_path):
     """A cache hit on both CSVs must not even try to read demographics.csv -- proves
-    fit_markers_lazy (and therefore the whole expensive fitting + Cox pass) never runs."""
+    fit_markers (and therefore the whole expensive fitting + Cox pass) never runs."""
     input_dir = tmp_path / "data"  # deliberately never created -- would raise if touched
     output_dir = tmp_path / "out"
     output_dir.mkdir()
@@ -83,7 +83,7 @@ def test_force_bypasses_the_plot_data_cache(tmp_path):
 def test_force_rebuilds_plot_data_but_does_not_refresh_the_setpoint_dependency(tmp_path, monkeypatch, capsys):
     """force=True at this script's own layer (fig3a/b) must not cascade into re-fitting
     setpoints that are already cached -- that dependency is only ever refreshed by
-    run_setpoints_by_marker's own --force."""
+    build_setpoints's own --force."""
     monkeypatch.setattr(m, "TESTCODES_LIST", ["HB"])
 
     input_dir = tmp_path / "data"
@@ -99,7 +99,7 @@ def test_force_rebuilds_plot_data_but_does_not_refresh_the_setpoint_dependency(t
             "sex": ["F"] * 8,
         }
     )
-    compute_sp_df(tests_df, test_code="HB", force=True, canonical=True)
+    compute_sp_df(tests_df, test_code="HB", force=True, full_population=True)
 
     output_dir = tmp_path / "out"
     output_dir.mkdir()

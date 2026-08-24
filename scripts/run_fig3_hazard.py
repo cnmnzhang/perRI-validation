@@ -2,16 +2,20 @@
 
   fig3a ("HR by model"): one mortality Cox regression per marker, using each
     patient's 5th setpoint, filtered for measurements in the popRI.
+    requiring that the fith setpoint is between min_dts=2014-01-01, max_dts=2019-01-01
+
+
   fig3b ("HR by baseline index"): the same Cox regression repeated using the
     setpoint estimated from only the patient's 1st/2nd/3rd/4th/5th isolated
     measurement, to see how HR estimates stabilize as more data accumulates.
-
+    requiring that the k-th isolated setpoint is between min_dts=2014-01-01, max_dts=2019-01-01.
+    
 Required inputs: `tests.csv` (anon_id, ts, test_code, result_value, sex) covering
 all 43 pipeline markers and a Demographics table (anon_id, sex, birth_date,
 death_ts). Marker display order comes from constants/marker_lab_config.py. 
 
 Run:
-    python -m scripts.run_fig3_hazard --input-dir data --output-dir outputs/fig3_hazard
+    python -m scripts.run_fig3_hazard --input-dir data --output-dir data/outputs/fig3_hazard
 """
 
 from __future__ import annotations
@@ -31,30 +35,25 @@ import matplotlib.pyplot as plt  # noqa: E402
 from utils.cache import cache_or_compute  # noqa: E402
 from utils.io import load_demographics_csv  # noqa: E402
 from utils.logging_utils import tagged_stdout, timed_step  # noqa: E402
-from utils.setpoints import fit_markers_lazy  # noqa: E402
+from utils.setpoints import fit_markers  # noqa: E402
 from utils.clinical.coxph import run_cox_summary  # noqa: E402
 from utils.clinical.get import attach_ref_intervals, compute_within_normal_mask  # noqa: E402
 from utils.clinical.run_clinical import get_one_setpoint  # noqa: E402
 from utils.log_transform_markers import is_log_transform  # noqa: E402
 from constants.marker_config import MARKER_IOI_ORDER, TESTCODES_LIST  # noqa: E402
-from constants.runtime import CV_COL, ID_COL, INDEX_COL, MAX_FIT_DATE, MODEL_COL, MU, SEX_COL, SIGMA, TEST_CODE_COL, TS_COL  # noqa: E402
+from constants.runtime import (CV_COL, ID_COL, INDEX_COL, MAX_FIT_DATE, 
+                               DEFAULT_MIN_MEASUREMENTS,
+                               MODEL_COL, MU, SEX_COL, SIGMA, TEST_CODE_COL, TS_COL)  # noqa: E402
 from utils.visuals_fig3 import fig3baseline, fig3hr  # noqa: E402
 
 DEMOGRAPHICS_FILE = "demographics.csv"
 
 OBSERVATION_PERIOD_START = "2014-01-01"  # matches the real pipeline's fig3a/b window
 MAX_DTS = MAX_FIT_DATE
-MIN_ISOLATED_PANEL_A = 5
+MIN_ISOLATED_PANEL_A = 5 # an exception due to the exact study design
 BASELINE_INDICES = [1, 2, 3, 4, 5]
 VARIABLES = (MU, CV_COL)
 
-# bayesian-setpoint-inference's config/opt_config.py:MIN_MEASUREMENTS -- the bar
-# filter_sp_df's "Minimum Measurements Filter" enforces on the full setpoint sequence
-# before any per-baseline-index selection. Distinct from (and stricter than)
-# constants.runtime.DEFAULT_MIN_MEASUREMENTS (3), which only gates whether perri fits a
-# patient at all (utils/setpoints.py) -- a patient with 3-4 isolated measurements passes
-# that bar and gets fit, but must still be excluded here to match the live pipeline.
-MIN_MEASUREMENTS_FOR_FILTER = 5
 
 
 def _build_setpoints_with_demog(sp_df: pd.DataFrame, demog_df: pd.DataFrame) -> pd.DataFrame:
@@ -96,21 +95,13 @@ def _filter_sp_df(sp_df: pd.DataFrame) -> pd.DataFrame:
 
     1. Date filter: drop measurements at/after MAX_FIT_DATE.
     2. Minimum measurements filter: drop a (patient, test_code, model)'s entire sequence
-       if it has fewer than MIN_MEASUREMENTS_FOR_FILTER rows *after* the date filter above.
-       This is the one that actually explains most of fig3b's low-baseline-index drift: a
-       patient with only 3-4 isolated measurements passes compute_sp_df's looser fitting bar
-       (constants.runtime.DEFAULT_MIN_MEASUREMENTS = 3) and gets fit, contributing rows at
-       low index values (1, 2) -- but the live pipeline requires 5 before considering them
-       for fig3 at all, at any baseline index. Without this step, those extra patients
-       inflate every low-index cohort (baseline_index=1 was ~5.7x ground truth's n) while
-       naturally vanishing by index 4-5, since they don't have enough measurements to reach
-       there -- exactly the "divergence shrinks as baseline_index grows" pattern seen in
-       data/UWM/ comparisons.
+       if it has fewer than MIN_MEASUREMENTS_FOR_FILTER rows prior to
+       MAX_FIT_DATE (the live pipeline's "minimum measurements" filter is applied
     3. CV filter (_filter_invalid_cv_patients).
     """
     dated = sp_df[sp_df[TS_COL] < pd.Timestamp(MAX_FIT_DATE)]
     counts = dated.groupby([ID_COL, TEST_CODE_COL, MODEL_COL])[ID_COL].transform("size")
-    met_min = dated[counts >= MIN_MEASUREMENTS_FOR_FILTER]
+    met_min = dated[counts >= MIN_ISOLATED_PANEL_A]
     return _filter_invalid_cv_patients(met_min)
 
 
@@ -208,9 +199,9 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False) -> dict:
         if "sp_df_demog" not in sp_df_holder:
             demog_df = load_demographics_csv(input_dir / DEMOGRAPHICS_FILE)
             # force is this script's own fig3a/b cache only -- never cascades to the shared
-            # setpoint dependency (run_setpoints_by_marker's job, not this script's).
+            # setpoint dependency (build_setpoints's job, not this script's).
             with timed_step("fit_setpoints", f"Fitting setpoints for {len(TESTCODES_LIST)} markers"):
-                sp_df = fit_markers_lazy(input_dir, TESTCODES_LIST, force=False, label="fig3_hazard")
+                sp_df = fit_markers(input_dir, TESTCODES_LIST, force=False, label="fig3_hazard")
             sp_df_holder["sp_df"] = sp_df
             sp_df_demog = _build_setpoints_with_demog(sp_df, demog_df)
             sp_df_holder["sp_df_demog"] = _filter_sp_df(sp_df_demog)
@@ -267,7 +258,7 @@ def run(*, input_dir: Path, output_dir: Path, force: bool = False) -> dict:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run fig3a/b's Bayesian-only HR panels.")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig3_hazard")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig3_hazard")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 

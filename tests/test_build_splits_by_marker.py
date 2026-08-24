@@ -1,6 +1,6 @@
-"""Tests for scripts/run_tests_by_marker.py.
+"""Tests for scripts/build_splits_by_marker.py.
 
-tests_by_marker is now an explicit prerequisite step (like run_dx_incident is for
+tests_by_marker is now an explicit prerequisite step (like build_dx_incident is for
 dx_incident.csv), not built implicitly by whichever analysis script happens to run
 first -- these tests cover the script's own run()/manifest, and that downstream
 loaders correctly see what it produced.
@@ -9,7 +9,7 @@ loaders correctly see what it produced.
 import pandas as pd
 import pytest
 
-from scripts.run_tests_by_marker import run
+from scripts.build_splits_by_marker import run
 from utils.io import load_tests_marker_subset
 from utils.io import tests_by_marker_dir as get_marker_dir
 

@@ -15,22 +15,22 @@ import time
 from pathlib import Path
 
 from utils.bootstrap import ensure_importable
-from scripts import run_dx_incident, run_fig3_dx, run_fig3_hazard, run_fig4_dx_cases, run_fig4_pregnancy, run_fig5_iron_infusion, run_tests_by_marker
+from scripts import build_dx_incident, run_fig3_dx, run_fig3_hazard, run_fig4_dx_cases, run_fig4_pregnancy, run_fig5_iron_infusion, build_splits_by_marker
 
 ensure_importable()
 
 from utils.logging_utils import tagged_stdout  # noqa: E402
-from scripts import run_setpoints_by_marker  # noqa: E402
+from scripts import build_setpoints  # noqa: E402
 
 ANALYSES = {
-    "tests_by_marker": run_tests_by_marker.run,
-    "setpoints_by_marker": run_setpoints_by_marker.run,
-    "dx_incident": run_dx_incident.run,
-    "fig3_dx": run_fig3_dx.run,
-    "fig5_iron_infusion": run_fig5_iron_infusion.run,
-    "fig4_dx_cases": run_fig4_dx_cases.run,
+    "tests_by_marker": build_splits_by_marker.run,
+    "setpoints_by_marker": build_setpoints.run,
+    "dx_incident": build_dx_incident.run,
     "fig3_hazard": run_fig3_hazard.run,
+    "fig3_dx": run_fig3_dx.run,
+    "fig4_dx_cases": run_fig4_dx_cases.run,
     "fig4_pregnancy": run_fig4_pregnancy.run,
+    "fig5_iron_infusion": run_fig5_iron_infusion.run,
 }
 
 # Analyses that consume dx_incident's dx_incident.csv rather than re-deriving it.
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run perri-validation analyses end to end.")
     parser.add_argument("--analysis", choices=[*ANALYSES, "all"], default="all")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent / "data" / "outputs")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 

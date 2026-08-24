@@ -9,16 +9,16 @@ heatmap), using utils/visuals_fig4.py's rendering functions
 directly (not a simplified re-implementation).
 
 Required inputs: `tests.csv` (CRE, WBC, TSH, T4FR rows), a Demographics table,
-and the *derived* Dx table produced by `scripts.run_dx_incident` (`dx_incident.csv`)
-— see README.md. Run dx_incident first: `python -m scripts.run_dx_incident`.
+and the *derived* Dx table produced by `scripts.build_dx_incident` (`dx_incident.csv`)
+— see README.md. Run dx_incident first: `python -m scripts.build_dx_incident`.
 This script will raise a clear error naming the expected path if that file
 isn't there yet. Reads its markers from the per-marker split built by
-`scripts.run_tests_by_marker` -- run that first too (or use
+`scripts.build_splits_by_marker` -- run that first too (or use
 `run_all`, which sequences both automatically); raises a clear FileNotFoundError
 with the command to run if it hasn't been built yet.
 
 Run:
-    python -m scripts.run_fig4_dx_cases --input-dir data --output-dir outputs/fig4_dx_cases
+    python -m scripts.run_fig4_dx_cases --input-dir data --output-dir data/outputs/fig4_dx_cases
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ import numpy as np  # noqa: E402
 from utils.io import load_demographics_csv, load_dx_incident, load_tests_marker_subset  # noqa: E402
 from utils.logging_utils import tagged_stdout  # noqa: E402
 from utils.visuals_shared import save_fig_as_svg  # noqa: E402
-from utils.setpoints import compute_sp_df, is_fitted_canonical  # noqa: E402
+from utils.setpoints import compute_sp_df, is_fitted_full_population  # noqa: E402
 from utils.cache import cache_or_compute  # noqa: E402
 from utils.clinical import get as _get  # noqa: E402
 from utils.clinical.get import attach_ref_intervals  # noqa: E402
@@ -81,9 +81,9 @@ from utils.visuals_fig4 import (  # noqa: E402
 )
 DEMOGRAPHICS_FILE = "demographics.csv"
 
-# Manually-selected example patients, written by `scripts.run_fig4_dx_cases_case --accept N`.
+# Manually-selected example patients, written by `utils.dx_case_case --accept N`.
 # Kept outside any single --output-dir so a saved case survives across output-dir choices.
-CASES_JSON_PATH = Path(__file__).resolve().parent.parent / "outputs" / "fig4_dx_cases_cases.json"
+CASES_JSON_PATH = Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig4_dx_cases_cases.json"
 BASELINE_SORT_N = 3
 
 def _outcome_markers(outcome_cfg) -> list[str]:
@@ -110,7 +110,7 @@ def _direction_columns(lower: bool, upper: bool) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Example-patient case selection (saved-case / group-B / naive-fallback tiers).
 # Mirrors bayesian-setpoint-inference's scripts/figures/fig4_prog.py +
-# fig4_prog_case.py case-selection machinery; scripts/run_fig4_dx_cases_case.py
+# fig4_prog_case.py case-selection machinery; utils/dx_case_case.py
 # is this repo's counterpart to fig4_prog_case.py for browsing/saving cases.
 # ---------------------------------------------------------------------------
 
@@ -228,7 +228,7 @@ def find_candidates(
     """Return candidate rows sorted by baseline plausibility, then |delta|.
 
     Used both by the tiered example-patient selector below and by
-    scripts/run_fig4_dx_cases_case.py for interactive browsing.
+    utils/dx_case_case.py for interactive browsing.
     """
     per_col, pop_col = _direction_columns(outcome_cfg.flag_below, outcome_cfg.flag_above)
     missing = [c for c in [pop_col, per_col, DELTA_COL] if c not in presenting_df.columns]
@@ -301,7 +301,7 @@ def _select_example_patient(
     """Select the example patient for one outcome's trajectory panel.
 
     Fallback order:
-    1. Saved case from CASES_JSON_PATH (manually selected via run_fig4_dx_cases_case.py --accept).
+    1. Saved case from CASES_JSON_PATH (manually selected via dx_case_case.py --accept).
     2. Best group-B candidate (pop_in & per_out & event), ranked by baseline plausibility then |delta|.
     3. _select_fallback_patient (first event patient, no PerRI requirement).
     """
@@ -417,8 +417,8 @@ def _heatmap_tidy_df(spec: dict) -> pd.DataFrame:
 def compute_one_outcome(outcome_name: str, *, input_dir: Path, dx_incident, demographics_df, output_dir: Path, force: bool = False) -> dict:
     """Computes (does not plot) everything one row of the combined mosaic needs.
 
-    Loads this outcome's own markers only, and only when actually needed: sp_df's canonical
-    cache (shared with fig3_hazard/run_setpoints_by_marker/fig3_dx) is checked before touching
+    Loads this outcome's own markers only, and only when actually needed: sp_df's full_population
+    cache (shared with fig3_hazard/build_setpoints/fig3_dx) is checked before touching
     tests.csv at all, and the cohort cache below skips tests_df entirely on a hit. sp_df
     itself is still always needed (not just for cohort-building) -- plot_combined's heatmap
     panel reads it directly, regardless of whether the cohort was cached.
@@ -437,11 +437,11 @@ def compute_one_outcome(outcome_name: str, *, input_dir: Path, dx_incident, demo
         return tests_df_holder["value"]
 
     # force (this outcome's own cohort cache, below) never cascades to the shared setpoint
-    # dependency -- that's run_setpoints_by_marker's job, not this script's.
-    if is_fitted_canonical(test_code):
-        sp_df = compute_sp_df(None, test_code=test_code, canonical=True)
+    # dependency -- that's build_setpoints's job, not this script's.
+    if is_fitted_full_population(test_code):
+        sp_df = compute_sp_df(None, test_code=test_code, full_population=True)
     else:
-        sp_df = compute_sp_df(_get_tests_df(), test_code=test_code, force=False, canonical=True)
+        sp_df = compute_sp_df(_get_tests_df(), test_code=test_code, force=False, full_population=True)
     if sp_df.empty:
         raise ValueError(f"[{outcome_name}] No setpoints computable for test_code={test_code}.")
 
@@ -553,7 +553,7 @@ def run(*, input_dir: Path, output_dir: Path, dx_incident_path: Path = None, out
     output_dir.mkdir(parents=True, exist_ok=True)
     outcomes = outcomes or list(OUTCOME_REGISTRY.keys())
     if dx_incident_path is None:
-        dx_incident_path = Path(__file__).resolve().parent.parent / "outputs" / "dx_incident" / "dx_incident.csv"
+        dx_incident_path = Path(__file__).resolve().parent.parent / "data" / "outputs" / "dx_incident" / "dx_incident.csv"
 
     dx_incident = load_dx_incident(dx_incident_path)
     demographics_df = load_demographics_csv(input_dir / DEMOGRAPHICS_FILE)
@@ -561,7 +561,7 @@ def run(*, input_dir: Path, output_dir: Path, dx_incident_path: Path = None, out
     results = {}
     manifests = {}
     for outcome_name in outcomes:
-        print(f"\n=== fig4 progression: {outcome_name} ===")
+        print(f"\n[{outcome_name}]")
         try:
             results[outcome_name] = compute_one_outcome(outcome_name, input_dir=input_dir, dx_incident=dx_incident, demographics_df=demographics_df, output_dir=output_dir, force=force)
             manifests[outcome_name] = results[outcome_name]["manifest"]
@@ -602,8 +602,8 @@ def run(*, input_dir: Path, output_dir: Path, dx_incident_path: Path = None, out
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run fig4 dx cases (aki, leukemia, hypothyroidism).")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig4_dx_cases")
-    parser.add_argument("--dx-incident-path", type=Path, default=None, help="Path to dx_incident.csv from `scripts.run_dx_incident`. Default: outputs/dx_incident/dx_incident.csv")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig4_dx_cases")
+    parser.add_argument("--dx-incident-path", type=Path, default=None, help="Path to dx_incident.csv from `scripts.build_dx_incident`. Default: data/outputs/dx_incident/dx_incident.csv")
     parser.add_argument("--outcome", action="append", dest="outcomes", choices=list(OUTCOME_REGISTRY.keys()), help="Restrict to one outcome (repeatable). Default: all.")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)

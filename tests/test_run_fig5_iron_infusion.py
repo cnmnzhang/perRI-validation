@@ -13,7 +13,7 @@ import pytest
 import scripts.run_fig5_iron_infusion as m
 import utils.setpoints as setpoints_module
 from scripts.run_fig5_iron_infusion import run
-from scripts.run_tests_by_marker import build_tests_by_marker
+from scripts.build_splits_by_marker import build_splits_by_marker
 from utils.io import load_tests_marker_subset
 from utils.setpoints import compute_sp_df
 
@@ -60,7 +60,7 @@ def test_missing_hb_marker_is_caught_and_recorded_not_raised(tmp_path):
         }
     ).to_csv(input_dir / "tests.csv", index=False)
     pd.DataFrame({"anon_id": ["p1"], "ts": ["2020-01-01"]}).to_csv(input_dir / "iron_mar.csv", index=False)
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
     manifest = run(input_dir=input_dir, output_dir=output_dir, force=True)  # must not raise
 
@@ -77,7 +77,7 @@ def test_bundle_cache_round_trips_and_skips_rebuild_on_second_run(tmp_path, monk
     input_dir.mkdir()
     output_dir = tmp_path / "out"
     _write_iv_iron_inputs(input_dir)
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
     first_manifest = run(input_dir=input_dir, output_dir=output_dir, force=True)
     assert "error" not in first_manifest
@@ -133,7 +133,7 @@ def test_get_hb_setpoints_filters_full_population_fit_when_cached(tmp_path):
     input_dir.mkdir()
     _write_iv_iron_inputs(input_dir, n_patients=4)
     _add_non_cohort_hb_patient(input_dir)
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
     full_tests_df = load_tests_marker_subset(input_dir, test_codes=["HB"])
     hb_full = full_tests_df[full_tests_df["test_code"] == "HB"].copy()
@@ -153,7 +153,7 @@ def test_get_hb_setpoints_filters_full_population_fit_when_cached(tmp_path):
 
 def test_reuses_full_population_hb_fit_instead_of_refitting_cohort(tmp_path, capsys):
     """End-to-end: with HB already fit on the full population (e.g. by
-    run_setpoints_by_marker or fig3_hazard), a full fig5_iron_infusion run must filter
+    build_setpoints or fig3_hazard), a full fig5_iron_infusion run must filter
     that fit down to the IV-iron cohort instead of fitting the cohort's smaller
     population itself -- proven by the "filtering instead of refitting" log line and no
     additional sp_df_HB_*.csv cache file appearing."""
@@ -162,7 +162,7 @@ def test_reuses_full_population_hb_fit_instead_of_refitting_cohort(tmp_path, cap
     output_dir = tmp_path / "out"
     _write_iv_iron_inputs(input_dir, n_patients=4)
     _add_non_cohort_hb_patient(input_dir)
-    build_tests_by_marker(input_dir)
+    build_splits_by_marker(input_dir)
 
     # Pre-fit the FULL HB population, via the exact same loading path build_iv_iron_bundle
     # uses internally (load_tests_marker_subset) -- so the population, and therefore the

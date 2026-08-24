@@ -1,8 +1,8 @@
 """Makes `perri_validation` importable when a script under  is run directly.
 
 Entry-point scripts (scripts/run_*.py) call ensure_importable() before any
-`from .. import ...` so they work both as `python -m scripts.run_dx_incident`
-(no bootstrap needed) and as `python scripts/run_dx_incident.py` (direct execution,
+`from .. import ...` so they work both as `python -m scripts.build_dx_incident`
+(no bootstrap needed) and as `python scripts/build_dx_incident.py` (direct execution,
 where the directory containing `` isn't automatically on sys.path).
 """
 

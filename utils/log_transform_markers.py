@@ -34,7 +34,7 @@ HR-level check was less conclusive either way (mu HR 1.147 raw vs 1.173 log vs
 ground truth's 1.113; cv HR 0.929 raw vs 1.024 log vs ground truth's 0.980 --
 raw closer on both, but neither exact), but fig4's near-exact match under
 raw-space settled it. See setpoints.py's `_cache_name_for`/
-`_canonical_cache_name` `_log` suffix, which lets both the log-transformed and
+`_full_population_cache_name` `_log` suffix, which lets both the log-transformed and
 raw-space TSH fits stay cached side by side so toggling TSH in/out of this set
 for comparison doesn't require re-fitting from scratch each time.
 FER/GLU/HSCRP/TRIG haven't been re-checked against this same direct-comparison

@@ -11,7 +11,7 @@ recorded in manifest.json (as an "error" key) rather than left as an uncaught tr
 matching how run_all.py and the other analyses report failure.
 
 Reads HB via the per-marker split built by
-`scripts.run_tests_by_marker` -- run that first (or use `run_all`,
+`scripts.build_splits_by_marker` -- run that first (or use `run_all`,
 which sequences it automatically); raises a clear FileNotFoundError with the command
 to run if it hasn't been built yet -- unless `iv_iron_bundle/` is already fully
 cached (see below), in which case the split is never even read. The course/cohort-
@@ -21,7 +21,7 @@ build_iron_infusion_trajectories) live in
 utils/clinical/run_clinical.py.
 
 **HB setpoints prefer an already-fit full population over a fresh cohort-only fit**
-(see _get_hb_setpoints): if `run_setpoints_by_marker`/`fig3_hazard`/`fig3_dx` have
+(see _get_hb_setpoints): if `build_setpoints`/`fig3_hazard`/`fig3_dx` have
 already fit HB on the full Tests population, this just filters that cached result
 down to the IV-iron cohort instead of fitting the (much smaller) cohort itself --
 valid because compute_sp_df fits each patient independently, and HB's grid bounds
@@ -38,7 +38,7 @@ plot_mosaic() -- delete output_dir/iv_iron_bundle/, or pass --force, after
 tests.csv/iron_mar.csv change.
 
 Run:
-    python -m scripts.run_fig5_iron_infusion --input-dir data --output-dir outputs/fig5_iron_infusion
+    python -m scripts.run_fig5_iron_infusion --input-dir data --output-dir data/outputs/fig5_iron_infusion
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ import pandas as pd  # noqa: E402
 from utils.io import load_iron_mar_csv, load_tests_marker_subset  # noqa: E402
 from utils.logging_utils import tagged_stdout  # noqa: E402
 from utils.visuals_shared import save_fig_as_svg  # noqa: E402
-from utils.setpoints import compute_sp_df, is_fitted, is_fitted_canonical  # noqa: E402
+from utils.setpoints import compute_sp_df, is_fitted, is_fitted_full_population  # noqa: E402
 from utils.clinical.inputs import IronInfusionConfig  # noqa: E402
 from utils.clinical.run_clinical import (  # noqa: E402
     _select_pre_post_labs,
@@ -107,18 +107,18 @@ BUNDLE_DATE_COLUMNS = {
 
 def _get_hb_setpoints(hb_full: pd.DataFrame, cohort_hb: pd.DataFrame, cohort_ids: list, *, test_code: str) -> pd.DataFrame:
     """Prefers filtering an already-cached full-population fit over fitting the (much
-    smaller) IV-iron cohort alone. Checks run_setpoints_by_marker/fig3_hazard's canonical
+    smaller) IV-iron cohort alone. Checks build_setpoints/fig3_hazard's full_population
     cache first, then fig3_dx's fingerprinted one (see utils/setpoints.py's
-    _canonical_cache_name vs. _cache_name_for) -- either one means the full population is
+    _full_population_cache_name vs. _cache_name_for) -- either one means the full population is
     already fit. Falls back to fitting the cohort itself if neither is cached yet.
 
     Never forced by this script's own --force (that only rebuilds iv_iron_bundle/, this
     script's own cache) -- the shared setpoint dependency is only ever refreshed by
-    run_setpoints_by_marker/fig3_hazard/fig3_dx's own --force.
+    build_setpoints/fig3_hazard/fig3_dx's own --force.
     """
-    if is_fitted_canonical(test_code):
+    if is_fitted_full_population(test_code):
         print(f"[fig5_iron_infusion] full-population {test_code} setpoints already cached -- filtering instead of refitting the cohort")
-        full_sp = compute_sp_df(hb_full, test_code=test_code, force=False, canonical=True)
+        full_sp = compute_sp_df(hb_full, test_code=test_code, force=False, full_population=True)
         return full_sp[full_sp[ID_COL].isin(cohort_ids)].reset_index(drop=True)
     if is_fitted(hb_full, test_code):
         print(f"[fig5_iron_infusion] full-population {test_code} setpoints already cached -- filtering instead of refitting the cohort")
@@ -208,7 +208,7 @@ def _load_or_build_bundle(*, input_dir: Path, output_dir: Path, config: IronInfu
     paths = _bundle_paths(output_dir)
 
     if not force and all(p.exists() for p in paths.values()):
-        print("[fig5_iron_infusion] iv_iron_bundle/ cache hit -- skipping tests.csv/iron_mar.csv read and cohort rebuild")
+        print("[fig5_iron_infusion] cache hit, skipping cohort build")
         bundle = {}
         for name, date_cols in BUNDLE_DATE_COLUMNS.items():
             df = pd.read_csv(paths[name])
@@ -280,8 +280,10 @@ def plot_mosaic(bundle: dict, path: Path, *, trajectory_df: pd.DataFrame = None,
     panel_f.remove()
     ax_f_f = fig.add_subplot(gs_f[0, 0])
     ax_f_m = fig.add_subplot(gs_f[1, 0])
-    fig5heatmap_on_ax(ax=ax_f_f, df=iv_cohort, x_col="result_pre", setpoint_col=MU, outcome_col="response", sex_value="F", label_y=True, label_x=False)
-    fig5heatmap_on_ax(ax=ax_f_m, df=iv_cohort, x_col="result_pre", setpoint_col=MU, outcome_col="response", sex_value="M", label_y=True, label_x=True)
+    with tagged_stdout("Female"):
+        fig5heatmap_on_ax(ax=ax_f_f, df=iv_cohort, x_col="result_pre", setpoint_col=MU, outcome_col="response", sex_value="F", label_y=True, label_x=False)
+    with tagged_stdout("Male"):
+        fig5heatmap_on_ax(ax=ax_f_m, df=iv_cohort, x_col="result_pre", setpoint_col=MU, outcome_col="response", sex_value="M", label_y=True, label_x=True)
 
     save_fig_as_svg(fig, "iron_infusion_mosaic", path, csv_path=", ".join(str(p) for p in csv_paths) if csv_paths else None)
     plt.close(fig)
@@ -293,6 +295,7 @@ def run(*, input_dir: Path, output_dir: Path, config: IronInfusionConfig = None,
 
     try:
         bundle = _load_or_build_bundle(input_dir=input_dir, output_dir=output_dir, config=config, force=force)
+        print(f"{n_ids(bundle['iv_cohort'])} patients")
         iv_cohort = bundle["iv_cohort"]
 
         cohort_path = output_dir / "iv_iron_cohort.csv"
@@ -328,7 +331,7 @@ def run(*, input_dir: Path, output_dir: Path, config: IronInfusionConfig = None,
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run the iron infusion (Fig5) cohort analysis.")
     parser.add_argument("--input-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "outputs" / "fig5_iron_infusion")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data" / "outputs" / "fig5_iron_infusion")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 

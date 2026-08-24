@@ -1,8 +1,8 @@
 """Tests for scripts/run_fig4_dx_cases.py's cache layering.
 
 compute_one_outcome must check, in order: (1) the outcome's cohort cache
-(fig4_dx_cases_<outcome>_cohort.csv), (2) the marker's canonical setpoint cache (shared
-with fig3_hazard/run_setpoints_by_marker/fig3_dx) -- and only fall back to loading
+(fig4_dx_cases_<outcome>_cohort.csv), (2) the marker's full_population setpoint cache (shared
+with fig3_hazard/build_setpoints/fig3_dx) -- and only fall back to loading
 tests.csv's per-marker split when both of those miss. The heavy clinical logic
 (load_or_create_analysis_ready_cohort, KM/forest-model fitting) is monkeypatched out here
 since it's unrelated to and already exercised elsewhere; these tests isolate the caching
@@ -23,7 +23,7 @@ def _isolated_cache_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(setpoints_module, "CACHE_DIR", tmp_path / "sp_cache")
 
 
-def _seed_canonical_sp_cache(test_code):
+def _seed_full_population_sp_cache(test_code):
     tests_df = pd.DataFrame(
         {
             ID_COL: ["p1"] * 8,
@@ -33,7 +33,7 @@ def _seed_canonical_sp_cache(test_code):
             SEX_COL: ["F"] * 8,
         }
     )
-    compute_sp_df(tests_df, test_code=test_code, force=True, canonical=True)
+    compute_sp_df(tests_df, test_code=test_code, force=True, full_population=True)
 
 
 def _seed_cohort_cache(path):
@@ -55,11 +55,11 @@ def _stub_heavy_clinical_logic(monkeypatch):
 
 
 def test_warm_caches_never_touch_tests_csv(tmp_path, monkeypatch):
-    """With both the cohort CSV and the marker's canonical setpoint cache already present,
+    """With both the cohort CSV and the marker's full_population setpoint cache already present,
     compute_one_outcome must not call load_tests_marker_subset at all."""
     outcome_name = "aki"
     test_code = m.OUTCOME_REGISTRY[outcome_name].markers[0]
-    _seed_canonical_sp_cache(test_code)
+    _seed_full_population_sp_cache(test_code)
 
     output_dir = tmp_path / "out"
     output_dir.mkdir()
@@ -80,7 +80,7 @@ def test_cold_cohort_cache_still_loads_tests_csv(tmp_path, monkeypatch):
     load tests.csv (to build the cohort) -- proving the cohort cache isn't skipped blindly."""
     outcome_name = "aki"
     test_code = m.OUTCOME_REGISTRY[outcome_name].markers[0]
-    _seed_canonical_sp_cache(test_code)
+    _seed_full_population_sp_cache(test_code)
 
     output_dir = tmp_path / "out"
     output_dir.mkdir()  # no cohort CSV seeded

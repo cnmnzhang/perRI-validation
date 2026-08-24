@@ -10,7 +10,7 @@ import pytest
 
 from pathlib import Path
 
-from scripts.run_tests_by_marker import build_tests_by_marker
+from scripts.build_splits_by_marker import build_splits_by_marker
 from utils.io import load_demographics_csv, load_dx_csv, load_iron_mar_csv, load_tests_csv, load_tests_marker_subset, resolve_tests_csv_path
 from utils.io import tests_by_marker_dir as resolve_tests_by_marker_dir
 from constants.schemas import ALL_SCHEMAS, DEMOGRAPHICS_SCHEMA, DX_SCHEMA, IRON_MAR_SCHEMA, TESTS_SCHEMA
@@ -233,27 +233,27 @@ def _write_tests_csv(input_dir, test_codes=("HB", "GLU", "HDL", "WBC"), n_patien
 
 def test_load_tests_marker_subset_raises_when_split_not_built(tmp_path):
     """Unlike the earlier design, load_tests_marker_subset never builds the split
-    itself -- build_tests_by_marker (run via scripts.run_tests_by_marker)
-    is now an explicit prerequisite, like run_dx_incident is for dx_incident.csv."""
+    itself -- build_splits_by_marker (run via scripts.build_splits_by_marker)
+    is now an explicit prerequisite, like build_dx_incident is for dx_incident.csv."""
     _write_tests_csv(tmp_path)
-    with pytest.raises(FileNotFoundError, match="run_tests_by_marker"):
+    with pytest.raises(FileNotFoundError, match="build_splits_by_marker"):
         load_tests_marker_subset(tmp_path, test_codes=["HB"])
 
 
 def test_load_tests_marker_subset_filters_to_requested_codes(tmp_path):
     _write_tests_csv(tmp_path)
-    build_tests_by_marker(tmp_path)
+    build_splits_by_marker(tmp_path)
     subset = load_tests_marker_subset(tmp_path, test_codes=["HB", "GLU"])
     assert sorted(subset["test_code"].unique()) == ["GLU", "HB"]
 
 
-def test_build_tests_by_marker_writes_one_file_per_marker_present_in_source(tmp_path):
+def test_build_splits_by_marker_writes_one_file_per_marker_present_in_source(tmp_path):
     """The split is marker-agnostic: every test_code in tests.csv gets its own file,
     not just whatever some later caller happens to ask for (HDL is never requested
     by load_tests_marker_subset below, but must still get split out, ready for some
     later caller)."""
     _write_tests_csv(tmp_path)  # HB, GLU, HDL, WBC
-    manifest = build_tests_by_marker(tmp_path)
+    manifest = build_splits_by_marker(tmp_path)
     assert set(manifest.keys()) == {"HB", "GLU", "HDL", "WBC"}
 
     marker_dir = tmp_path / "cache" / "tests_by_marker"
@@ -268,29 +268,29 @@ def test_load_tests_marker_subset_reuses_split_without_rereading_source(tmp_path
     master table is read exactly once, regardless of how many different marker
     subsets get requested afterward."""
     _write_tests_csv(tmp_path)
-    build_tests_by_marker(tmp_path)
+    build_splits_by_marker(tmp_path)
 
     (tmp_path / "tests.csv").unlink()
     subset = load_tests_marker_subset(tmp_path, test_codes=["GLU"])
     assert (subset["test_code"] == "GLU").all()
 
 
-def test_build_tests_by_marker_force_rederives(tmp_path):
+def test_build_splits_by_marker_force_rederives(tmp_path):
     _write_tests_csv(tmp_path, test_codes=("HB",), n_patients=2)
-    build_tests_by_marker(tmp_path)
+    build_splits_by_marker(tmp_path)
 
     _write_tests_csv(tmp_path, test_codes=("HB",), n_patients=5)  # tests.csv changed
-    build_tests_by_marker(tmp_path, force=True)
+    build_splits_by_marker(tmp_path, force=True)
     subset = load_tests_marker_subset(tmp_path, test_codes=["HB"])
     assert subset["anon_id"].nunique() == 5
 
 
-def test_build_tests_by_marker_skips_rebuild_without_force(tmp_path):
+def test_build_splits_by_marker_skips_rebuild_without_force(tmp_path):
     _write_tests_csv(tmp_path, test_codes=("HB",), n_patients=2)
-    build_tests_by_marker(tmp_path)
+    build_splits_by_marker(tmp_path)
 
     _write_tests_csv(tmp_path, test_codes=("HB",), n_patients=5)  # tests.csv changed
-    build_tests_by_marker(tmp_path)  # no force -- must not re-derive
+    build_splits_by_marker(tmp_path)  # no force -- must not re-derive
     subset = load_tests_marker_subset(tmp_path, test_codes=["HB"])
     assert subset["anon_id"].nunique() == 2
 
@@ -319,6 +319,6 @@ def test_load_tests_marker_subset_reads_gzipped_source(tmp_path):
     pd.read_csv(tmp_path / "tests.csv").to_csv(gz_path, index=False, compression="gzip")
     (tmp_path / "tests.csv").unlink()
 
-    build_tests_by_marker(tmp_path)
+    build_splits_by_marker(tmp_path)
     subset = load_tests_marker_subset(tmp_path, test_codes=["HB"])
     assert (subset["test_code"] == "HB").all()
