@@ -21,7 +21,11 @@ Schemas are defined in [`constants/schemas.py`](constants/schemas.py). Column na
 
 
 ### Tests
-One row per patient per test over time, covering every marker needed. Analysis for a missing marker will be gracefully handled. `tests.csv` may be gzipped by adding `tests.csv.gz` instead of `tests.csv` since file may be large. Scripts will look for `tests.csv` first, then falls back to `tests.csv.gz`. The table will be split into one CSV per marker, once, shared by every analysis. See `build_splits_by_marker` in `## Quickstart`. Tests do not have to be isolated. Downstream `build_setpoints` will handle isolation. Deduplication is handled to avoid marking a test as non-isolated, when it is. 
+One row per patient per test over time, covering every marker needed. Analysis for a missing marker will be gracefully handled. `tests.csv` may be gzipped by adding `tests.csv.gz` instead of `tests.csv` since file may be large. Scripts will look for `tests.csv` first, then falls back to `tests.csv.gz`. The table will be split into one CSV per marker, once, shared by every analysis. See `build_splits_by_marker` in `## Quickstart`. 
+
+Tests do not have to be isolated. Downstream `build_setpoints` will handle isolation. Deduplication is handled to avoid marking a test as non-isolated, when it is. 
+
+>If your data is already partitioned by marker, you can skip `tests.csv`/`build_splits_by_marker` entirely and drop per-marker CSVs (same columns as Tests, above) straight into `data/cache/splits_by_marker/{test_code}.csv` yourself
 
 **Markers needed in `tests.csv`**, by analysis:
 - fig3_hazard: all 43 routine laboratory markers
@@ -73,7 +77,7 @@ swimmer panel's cohort, laboratory, and infusion source tables are retained unde
 
 | script | purpose | question | notes|outputs | 
 |---|---|---|---|---|
-|[`tests_by_marker`](scripts/build_splits_by_marker.py)|creates dependencies||Splits `Tests` table into one file per marker present in `tests.csv`. Prerequisite for `fig3_dx`/`fig3_hazard`/`fig4_dx_cases`/`fig5_iron_infusion`|`data/cache/tests_by_marker/{marker}.csv`|
+|[`splits_by_marker`](scripts/build_splits_by_marker.py)|creates dependencies||Splits `Tests` table into one file per marker present in `tests.csv`. Prerequisite for `fig3_dx`/`fig3_hazard`/`fig4_dx_cases`/`fig5_iron_infusion`|`data/cache/splits_by_marker/{marker}.csv`|
 |[`setpoints_by_marker`](scripts/build_setpoints.py)|creates dependencies||Uses previous outputs and fits all 43 markers in `TESTCODES_LIST`, filtered down to patients who have at least 3 setpoints for the given marker file (hence, `_m3`). Setpoints are calculated using the `perri` package, pinned to a GitHub tag in `requirements.txt`|`data/cache/sp_df_{marker}_full_m3.csv`|
 |[`dx_incident`](scripts/build_dx_incident.py)|creates dependencies||Uses `Dx` to derive the first diagnosis per patient for a given set of diagnoses, where multiple codes can match to the same diagnosis. We match on ICD10, with ICD9 fall back, using a hardcoded mapping in [`constants/icd_config.py`](constants/icd_config.py). Prerequisite for `fig3_dx` and `fig4_dx_cases`|`data/outputs/dx_incident/dx_incident.csv`|
 |[`fig3_hazard`](scripts/run_fig3_hazard.py)|figure analyses|Do personalized setpoint characteristics reproduce associations with mortality?|for each of the 43 markers, using the setpoint caches, fits a mortality Cox regression on the patient's personal setpoint (mu/sigma/cv, adjusted for age and sex). a. `fig3a_hr_by_model.svg` using each patient's 5th setpoint, and b. `fig3b_hr_by_baseline` using the setpoint from only their 1st through 5th isolated measurement, to see how hazard ratios stabilize as more data accumulates | `data/outputs/fig3_hazard/*` |
@@ -139,7 +143,7 @@ serial, e.g. for debugging). Per the comment there: benchmarked on a 128-core ma
 gave ~6x speedup over serial, but going higher was flat-to-worse since each joblib worker pays its
 own numba JIT warmup for perri's `@njit`-compiled `bayesian()` fit on first call.
 
-- Used in tests_by_marker splitting. Once the master is read (~13 minutes or a 1.75GB gzipped file), 
+- Used in splits_by_marker splitting. Once the master is read (~13 minutes or a 1.75GB gzipped file), 
 writing each marker's split CSV is independent I/O-bound work, so it runs across a `ThreadPoolExecutor` (up to N_JOBS workers) instead of one file at a time.
 - Used in setpoint computation so `compute_sp_df` to fit patients in parallel. 
 

@@ -210,7 +210,7 @@ def is_fitted(tests_df: pd.DataFrame, test_code: str, min_measurements: int = DE
 def _full_population_cache_name(test_code: str, min_measurements: int) -> str:
     """The cache filename for a marker's full, unfiltered population -- no content-hash
     fingerprint, just test_code + min_measurements. Only valid when the caller trusts
-    tests_df (when supplied) is that marker's whole tests_by_marker split with no cohort
+    tests_df (when supplied) is that marker's whole splits_by_marker split with no cohort
     filtering; unlike _cache_name_for's fingerprint, this can't detect on its own that
     tests.csv changed underneath it -- delete data/cache/, or pass force=True, after it does.
 
@@ -304,7 +304,7 @@ def compute_sp_df(
     input_dir : where to load `test_code`'s per-marker split from (via
         load_tests_marker_subset) on a full_population cache miss when `tests_df` is
         None. None resolves to the repo's default `data/` dir (see
-        `tests_by_marker_dir`). Ignored when `tests_df` is supplied or the
+        `splits_by_marker_dir`). Ignored when `tests_df` is supplied or the
         full_population cache already hits.
 
     Returns

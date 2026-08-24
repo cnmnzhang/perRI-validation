@@ -23,7 +23,7 @@ from utils.logging_utils import tagged_stdout  # noqa: E402
 from scripts import build_setpoints  # noqa: E402
 
 ANALYSES = {
-    "tests_by_marker": build_splits_by_marker.run,
+    "splits_by_marker": build_splits_by_marker.run,
     "setpoints_by_marker": build_setpoints.run,
     "dx_incident": build_dx_incident.run,
     "fig3_hazard": run_fig3_hazard.run,

@@ -1,6 +1,6 @@
 """Tests for scripts/build_setpoints.py.
 
-Not a hard prerequisite the way tests_by_marker/dx_incident are -- compute_sp_df's own
+Not a hard prerequisite the way splits_by_marker/dx_incident are -- compute_sp_df's own
 per-marker caching means fig3_hazard/fig3_dx/fig4_dx_cases still fit inline fine without
 this having run. These tests cover the script's own run()/manifest, and that it actually
 warms the shared compute_sp_df cache other scripts then read from.

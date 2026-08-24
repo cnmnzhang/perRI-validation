@@ -92,25 +92,29 @@ def load_tests_csv(path: Union[str, Path]) -> pd.DataFrame:
 
 
 
-def tests_by_marker_dir(input_dir: Union[str, Path, None]) -> Path:
+def splits_by_marker_dir(input_dir: Union[str, Path, None]) -> Path:
     if input_dir is None:
         input_dir = Path(__file__).resolve().parents[1] / "data"
-    return Path(input_dir) / "cache" / "tests_by_marker"
+    return Path(input_dir) / "cache" / "splits_by_marker"
 
 
 
 def load_tests_marker_subset(input_dir: Union[str, Path] = None, test_codes: list=None) -> pd.DataFrame:
-    """Loads `test_codes` from the split built by scripts/build_splits_by_marker.py.
-    Raises a clear FileNotFoundError naming the command to run if
-    `scripts.build_splits_by_marker` hasn't been run yet, the same way
-    load_dx_incident does for dx_incident.csv.
+    """Loads `test_codes` from data/cache/splits_by_marker/{test_code}.csv -- either the
+    split built by scripts/build_splits_by_marker.py, or per-marker CSVs (each matching
+    TESTS_SCHEMA, like the master Tests table) dropped in directly by a site that already
+    has its data split by marker and would rather skip building/shipping a combined
+    tests.csv at all. Either way, a requested marker with no file present is silently
+    skipped (same graceful-handling-of-missing-markers behavior as everywhere else), not
+    an error -- only a missing splits_by_marker/ directory raises, since that means nothing
+    has been set up here yet.
     """
-    marker_dir = tests_by_marker_dir(input_dir)
-    sentinel_path = marker_dir / "_split_complete.json"
-    if not sentinel_path.exists():
+    marker_dir = splits_by_marker_dir(input_dir)
+    if not marker_dir.exists():
         raise FileNotFoundError(
-            f"Expected the per-marker Tests split at {marker_dir}, but it doesn't exist. Run it first: "
-            f"python -m scripts.build_splits_by_marker --input-dir {input_dir}"
+            f"Expected the per-marker Tests split at {marker_dir}, but it doesn't exist. Either run "
+            f"python -m scripts.build_splits_by_marker --input-dir {input_dir}, or populate "
+            f"{marker_dir} directly with one CSV per marker (matching TESTS_SCHEMA)."
         )
     frames = [load_tests_csv(marker_dir / f"{test_code}.csv") for test_code in test_codes if (marker_dir / f"{test_code}.csv").exists()]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[ID_COL, TS_COL, TEST_CODE_COL, MEASUREMENT_COL, SEX_COL])

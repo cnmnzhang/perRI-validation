@@ -12,7 +12,7 @@ from pathlib import Path
 
 from scripts.build_splits_by_marker import build_splits_by_marker
 from utils.io import load_demographics_csv, load_dx_csv, load_iron_mar_csv, load_tests_csv, load_tests_marker_subset, resolve_tests_csv_path
-from utils.io import tests_by_marker_dir as resolve_tests_by_marker_dir
+from utils.io import splits_by_marker_dir as resolve_splits_by_marker_dir
 from constants.schemas import ALL_SCHEMAS, DEMOGRAPHICS_SCHEMA, DX_SCHEMA, IRON_MAR_SCHEMA, TESTS_SCHEMA
 
 
@@ -172,9 +172,9 @@ def test_load_dx_csv_missing_column_raises(tmp_path):
         load_dx_csv(path)
 
 
-def test_tests_by_marker_dir_defaults_to_repo_data_dir_when_input_dir_is_none():
+def test_splits_by_marker_dir_defaults_to_repo_data_dir_when_input_dir_is_none():
     repo_root = Path(__file__).resolve().parents[1]
-    assert resolve_tests_by_marker_dir(None) == repo_root / "data" / "cache" / "tests_by_marker"
+    assert resolve_splits_by_marker_dir(None) == repo_root / "data" / "cache" / "splits_by_marker"
 
 
 def test_load_demographics_csv_drops_duplicate_anon_id(tmp_path):
@@ -247,6 +247,19 @@ def test_load_tests_marker_subset_filters_to_requested_codes(tmp_path):
     assert sorted(subset["test_code"].unique()) == ["GLU", "HB"]
 
 
+def test_load_tests_marker_subset_accepts_hand_populated_marker_files(tmp_path):
+    """A site that already has its data split by marker can drop per-marker CSVs
+    straight into splits_by_marker/ -- no tests.csv, no build_splits_by_marker run,
+    no _split_complete.json sentinel required."""
+    marker_dir = tmp_path / "cache" / "splits_by_marker"
+    marker_dir.mkdir(parents=True)
+    pd.DataFrame({"anon_id": ["p1"], "ts": ["2015-01-01"], "test_code": ["HB"], "result_value": [13.0], "sex": ["F"]}).to_csv(marker_dir / "HB.csv", index=False)
+
+    subset = load_tests_marker_subset(tmp_path, test_codes=["HB", "GLU"])
+
+    assert list(subset["test_code"].unique()) == ["HB"]  # GLU has no file -- silently skipped, not an error
+
+
 def test_build_splits_by_marker_writes_one_file_per_marker_present_in_source(tmp_path):
     """The split is marker-agnostic: every test_code in tests.csv gets its own file,
     not just whatever some later caller happens to ask for (HDL is never requested
@@ -256,7 +269,7 @@ def test_build_splits_by_marker_writes_one_file_per_marker_present_in_source(tmp
     manifest = build_splits_by_marker(tmp_path)
     assert set(manifest.keys()) == {"HB", "GLU", "HDL", "WBC"}
 
-    marker_dir = tmp_path / "cache" / "tests_by_marker"
+    marker_dir = tmp_path / "cache" / "splits_by_marker"
     assert (marker_dir / "_split_complete.json").exists()
     for tc in ("HB", "GLU", "HDL", "WBC"):
         assert (marker_dir / f"{tc}.csv").exists()

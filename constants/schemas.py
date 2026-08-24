@@ -47,7 +47,7 @@ PREGNANCY_LABS_SCHEMA = TableSchema(
     required_columns=(ID_COL, TS_COL, TEST_CODE_COL, MEASUREMENT_COL),
     notes="One row per lab measurement (pre-pregnancy and in-pregnancy). Only WBC/HCT rows are "
     "used; other CBC-panel markers present in the file are ignored. Uses the same `anon_id`/`ts` "
-    "column names as Tests -- adds `sex='F'` internally (pregnancy patients are always female "
+    "column names as Tests -- adds `sex='F'` pinternally (pregnancy patients are always female "
     "and the file has no sex column of its own).",
 )
 
