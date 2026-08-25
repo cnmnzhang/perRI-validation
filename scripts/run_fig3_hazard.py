@@ -39,7 +39,7 @@ from utils.setpoints import fit_markers  # noqa: E402
 from utils.clinical.coxph import run_cox_summary  # noqa: E402
 from utils.clinical.get import attach_ref_intervals, compute_within_normal_mask  # noqa: E402
 from utils.clinical.run_clinical import get_one_setpoint  # noqa: E402
-from utils.log_transform_markers import is_log_transform  # noqa: E402
+from perri import is_log_transform  # noqa: E402
 from constants.marker_config import MARKER_IOI_ORDER, TESTCODES_LIST  # noqa: E402
 from constants.runtime import (CV_COL, ID_COL, INDEX_COL, MAX_FIT_DATE, 
                                DEFAULT_MIN_MEASUREMENTS,
@@ -71,7 +71,7 @@ def _filter_invalid_cv_patients(sp_df: pd.DataFrame) -> pd.DataFrame:
     vendored from bayesian-setpoint-inference's utils/setpoints_runner.py:filter_sp_df's
     "CV Filter" step (the last of its three steps -- see _filter_sp_df).
 
-    "Invalid" differs by whether the marker is fit in log-space (utils/log_transform_markers):
+    "Invalid" differs by whether the marker is fit in log-space (perri.is_log_transform):
     log-space markers back-transform to cv = sqrt(exp(sigma_log^2) - 1), which legitimately
     exceeds 1 for a highly variable patient, so only cv < 0 (a numerically degenerate case) is
     rejected for them; non-log markers keep the standard cv in [0, 1] guard.

@@ -175,7 +175,7 @@ def test_compute_sp_df_full_population_writes_fingerprint_free_cache_name():
 
 
 def test_log_transform_marker_gets_distinct_log_suffixed_cache_name():
-    """A marker in utils.log_transform_markers.LOG_TRANSFORM_MARKERS (e.g. GLU) caches
+    """A marker where perri.is_log_transform is True (e.g. GLU) caches
     under a `_log`-suffixed filename, distinct from the non-log-transform cache name a
     plain test_code would use -- so toggling a marker in/out of that set (e.g. while
     investigating whether it should be log-transformed, as happened for TSH) produces two

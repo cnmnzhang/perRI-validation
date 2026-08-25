@@ -6,12 +6,12 @@ unchanged from perri's bundled hyperparameters -- see _params_override(). Only
 log_lambda_ still comes from perri's tuned defaults; overriding it needs a
 perri-level change (see README.md's "Adapting to a different population").
 
-A handful of markers (utils/hp_sex_selector.SEX_STRATIFIED_MARKERS) are fit
-with sex-specific ("F"/"M") hyperparameters instead of the pooled "ALL" row,
-matching the live pipeline -- see compute_sp_df's _compute().
+A handful of markers (SEX_STRATIFIED_MARKERS below) are fit with sex-specific
+("F"/"M") hyperparameters instead of the pooled "ALL" row, matching the live
+pipeline -- see compute_sp_df's _compute().
 
-A handful of markers (utils/log_transform_markers.LOG_TRANSFORM_MARKERS) are fit
-in log-space instead of raw units -- see _fit_batch_for_group().
+A handful of markers (perri.is_log_transform) are fit in log-space instead of
+raw units -- see _fit_batch_for_group().
 """
 
 import math
@@ -26,14 +26,34 @@ from constants.runtime import DEFAULT_MIN_MEASUREMENTS, ID_COL, INDEX_COL, MEASU
 from utils.cache import cache_or_compute as _cache_or_compute
 from utils.cache import hash_dataframe
 from utils.clinical.get import popRI
-from utils.hp_sex_selector import is_sex_stratified
 from utils.io import load_tests_marker_subset
-from utils.log_transform_markers import is_log_transform
-from perri import fit_batch, get_default_params
+from perri import fit_batch, get_default_params, is_log_transform
 
 SP_DF_COLUMNS = [ID_COL, TEST_CODE_COL, MODEL_COL, TS_COL, MU, SIGMA, MEASUREMENT_COL, SEX_COL, INDEX_COL]
 
 SMALL_VALUE = 0.001
+
+# Per-marker sex-stratified hyperparameter selection, vendored from bayesian-setpoint-
+# inference's utils/hp_sex_selector.py. The live pipeline decides, per marker, whether to
+# fit with pooled ("ALL") or sex-specific ("F"/"M") hyperparameters via is_sex_stratified(),
+# which merges config/sex_stratified_markers.json's biological defaults (sex-specific
+# reference intervals -- e.g. HB, HCT) with a convergence assessment's per-marker override
+# (config/sex_stratified_markers_{SUFFIX}_{DATA_VERSION}.json, produced by
+# scripts/diagnostics/assess_lambda_convergence.py). That merge is baked in here as a
+# static set rather than re-vendoring the convergence-sweep machinery, since perri-validation
+# targets one fixed, published set of figures (SUFFIX="local", DATA_VERSION="v_obj2" -- the
+# pipeline's current default and what generates its live fig3 artifacts) rather than
+# re-running future sweeps. Resolved by calling bayesian-setpoint-inference's own
+# utils.hp_sex_selector.is_sex_stratified() over all 43 markers under that config. Re-derive
+# this set (and re-check it hasn't changed) if bayesian-setpoint-inference's DATA_VERSION or
+# its sex_stratified_markers*.json configs are ever updated.
+SEX_STRATIFIED_MARKERS = frozenset({"WBC", "HB", "HCT", "RBC", "ALB", "ALT", "ALK", "TRIG", "HDL", "TSH", "FER"})
+
+
+def is_sex_stratified(test_code: str) -> bool:
+    """Return True if this marker should be fit with per-sex (F/M) hyperparameters
+    instead of the pooled ALL row."""
+    return test_code in SEX_STRATIFIED_MARKERS
 
 # Empirical reference-interval fallback for one-sided markers (e.g. HDL, pop_ri
 # upper bound = inf): the 95% reference interval computed from this population's
@@ -80,21 +100,54 @@ def _grid_bounds_from_pop_ri(low: float, high: float, log_space: bool = False) -
     return {"min_mu": min_mu, "max_mu": max_mu, "min_sigma": SMALL_VALUE, "max_sigma": max_sigma}
 
 
-def _compute_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
-    """Empirical (patch_lower, patch_upper) reference interval for a one-sided marker,
-    computed from this population's own isolated measurements (the same isolation
-    filter perri's fit_batch applies internally, min_gap_days=90) rather than from
-    a clinical pop_ri that has no finite bound to derive grid bounds from.
+def _isolated_values(df: pd.DataFrame) -> np.ndarray:
+    """This population's own isolated measurements (the same isolation filter
+    perri's fit_batch applies internally, min_gap_days=90), NaNs dropped.
 
-    `df` is already filtered to one test_code (as compute_sp_df does before calling
-    this). Returns None if there's no isolated data to compute a percentile from.
+    `df` is already filtered to one test_code (and, for a sex-stratified group,
+    to one sex) as compute_sp_df does before calling this.
     """
     isolated_values = [filter_isolated(g[MEASUREMENT_COL].to_numpy(), g[TS_COL])[0] for _, g in df.groupby(ID_COL)]
     all_values = np.concatenate(isolated_values) if isolated_values else np.array([])
-    all_values = all_values[~np.isnan(all_values)]
+    return all_values[~np.isnan(all_values)]
+
+
+def _compute_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
+    """Empirical (patch_lower, patch_upper) reference interval for a one-sided marker,
+    computed from this population's own isolated measurements rather than from a
+    clinical pop_ri that has no finite bound to derive grid bounds from.
+
+    Returns None if there's no isolated data to compute a percentile from, or if the
+    population is too small/degenerate for p2.5/p97.5 to span a positive width (e.g.
+    a single distinct value) -- a zero-width grid divides by zero downstream in
+    bayesian_model.build_prior_flat.
+    """
+    all_values = _isolated_values(df)
     if all_values.size == 0:
         return None
-    return float(np.percentile(all_values, _LOWER_PCTL)), float(np.percentile(all_values, _UPPER_PCTL))
+    low, high = float(np.percentile(all_values, _LOWER_PCTL)), float(np.percentile(all_values, _UPPER_PCTL))
+    return (low, high) if high > low else None
+
+
+def _compute_log_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
+    """Positive-only empirical log-space (patch_lower, patch_upper), computed from
+    this population's own isolated measurements -- matching the live pipeline's
+    utils.patch_popri.compute_log_patch, which this repo's log-transform markers
+    now use as their PREFERRED grid-bound source (see get_log_model_constants),
+    ahead of (not just as a fallback for) a finite clinical pop_ri.
+
+    Returns None if there's no isolated positive data to compute a percentile from
+    (e.g. an empty or all-nonpositive population), or if the population is too
+    small/degenerate for p2.5/p97.5 to span a positive width -- the caller falls
+    back to deriving bounds from pop_ri in either case.
+    """
+    all_values = _isolated_values(df)
+    positive = all_values[all_values > 0]
+    if positive.size == 0:
+        return None
+    log_values = np.log(positive)
+    low, high = float(np.percentile(log_values, _LOWER_PCTL)), float(np.percentile(log_values, _UPPER_PCTL))
+    return (low, high) if high > low else None
 
 
 def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_space: bool = False) -> dict:
@@ -108,17 +161,26 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
     min_mu/max_mu/min_sigma/max_sigma unchanged only if that population has no
     isolated data to compute a patch from.
 
-    log_space=True (for utils.log_transform_markers.LOG_TRANSFORM_MARKERS) log-
-    transforms the resolved (low, high) bounds before deriving the grid, matching
-    the live pipeline's utils/get.py:get_log_model_constants. pop_ri lower bounds
-    are sometimes exactly 0 (e.g. HSCRP, BILD), where log(low) is undefined; rather
-    than clipping at an arbitrary raw-space floor (1e-6, which logs to ~-13.8 and
-    has nothing to do with the marker's real smallest values -- confirmed to break
-    BILD/HSCRP's fitted mu and CV on real data), anchor log_lo symmetrically at
-    log_hi - 4.0, the same +/-4-log-unit span _grid_bounds_from_pop_ri already
-    implies via its 2x-ref_size expansion.
+    log_space=True (for markers where perri.is_log_transform is True) prefers
+    the positive-only empirical log-space patch (_compute_log_popri_patch) over a
+    log-transformed pop_ri, matching the live pipeline's utils/get.py:
+    get_log_model_constants now preferring utils.patch_popri's empirical log p2.5/
+    p97.5 over a clinical-pop_ri-derived fallback. Only when that patch is
+    unavailable (no isolated positive data for this population) do we fall back to
+    log-transforming pop_ri directly -- pop_ri lower bounds are sometimes exactly 0
+    (e.g. HSCRP, BILD), where log(low) is undefined; rather than clipping at an
+    arbitrary raw-space floor (1e-6, which logs to ~-13.8 and has nothing to do with
+    the marker's real smallest values -- confirmed to break BILD/HSCRP's fitted mu
+    and CV on real data), anchor log_lo symmetrically at log_hi - 4.0, the same
+    +/-4-log-unit span _grid_bounds_from_pop_ri already implies via its 2x-ref_size
+    expansion.
     """
     params = get_default_params(test_code, sex=sex)
+    if log_space:
+        log_bounds = _compute_log_popri_patch(df)
+        if log_bounds is not None:
+            params.update(_grid_bounds_from_pop_ri(*log_bounds, log_space=True))
+            return params
     low, high = popRI(sex=sex, test_code=test_code)
     bounds = (low, high) if math.isfinite(low) and math.isfinite(high) else _compute_popri_patch(df)
     if bounds is None:
@@ -134,42 +196,28 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
 
 def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_measurements: int, n_jobs: int) -> pd.DataFrame:
     """fit_batch for one (test_code, sex_label) group, transparently handling
-    log-space fitting for utils.log_transform_markers.LOG_TRANSFORM_MARKERS.
+    log-space fitting for markers where perri.is_log_transform is True.
 
-    Mirrors the live pipeline's utils/setpoints_runner.py:run_patient_from_dict:
-    measurements are log-transformed before fitting (clipped at 1e-6, matching
-    _params_override's grid-bound clipping), and mu/sigma are back-transformed via
-    the exact log-normal formula after fitting -- mu_raw = exp(mu_log), sigma_raw =
-    mu_raw * sqrt(exp(sigma_log^2) - 1). perri's fit_batch echoes back whatever
-    `value` it was fit on, so the fitted `value` column (log-space) is swapped back
-    for the original raw measurement per (patient, timestamp) -- the live pipeline's
-    sp_df always stores raw-unit measurements regardless of which space mu/sigma
-    were fit in.
+    perri itself handles log-space fitting internally (log-transforms
+    measurements before fitting, back-transforms mu/sigma after via the exact
+    log-normal formula, and always echoes back the original raw `value`) -- see
+    perri.fit_batch's log_transform parameter. We still resolve log_space here
+    (rather than leaving log_transform=None for perri.fit_batch to resolve on
+    its own) so _params_override can compute grid bounds in the matching space.
     """
     log_space = is_log_transform(test_code)
-    fit_df = df
-    if log_space:
-        fit_df = df.copy()
-        fit_df[MEASUREMENT_COL] = np.log(np.clip(fit_df[MEASUREMENT_COL].to_numpy(), 1e-6, None))
-    fitted = fit_batch(
-        fit_df,
+    return fit_batch(
+        df,
         value_col=MEASUREMENT_COL,
         timestamp_col=TS_COL,
         patient_id_col=ID_COL,
         test_code=test_code,
         sex=sex_label,
         params=_params_override(test_code, df, sex=sex_label, log_space=log_space),
+        log_transform=log_space,
         min_measurements=min_measurements,
         n_jobs=n_jobs,
     )
-    if fitted.empty or not log_space:
-        return fitted
-    # use the original raw measurement for each (patient, timestamp) instead of the log-transformed one
-    raw_lookup = df.rename(columns={ID_COL: "patient_id", TS_COL: "timestamp", MEASUREMENT_COL: "value"})[["patient_id", "timestamp", "value"]]
-    fitted = fitted.drop(columns=["value"]).merge(raw_lookup, on=["patient_id", "timestamp"], how="left")
-    fitted["sigma"] = np.exp(fitted["mu"]) * np.sqrt(np.exp(fitted["sigma"] ** 2) - 1)
-    fitted["mu"] = np.exp(fitted["mu"])
-    return fitted
 
 
 def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_measurements: int) -> str:
@@ -188,10 +236,10 @@ def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_
     `sp_df_HB.csv`, which previously caused real cache thrashing (and, worse, real cached
     results getting overwritten by unrelated smoke-test runs sharing the same path).
 
-    Also embeds a `_log` suffix when utils.log_transform_markers.is_log_transform(test_code)
-    -- so flipping a marker in/out of LOG_TRANSFORM_MARKERS (e.g. while investigating whether
-    it should be log-transformed) produces a distinct cache file instead of silently
-    overwriting the other variant's fit, letting both be kept around and compared.
+    Also embeds a `_log` suffix when perri.is_log_transform(test_code) is True -- so a
+    marker flipping in/out of log-transformed status upstream (e.g. while investigating
+    whether it should be log-transformed) produces a distinct cache file instead of
+    silently overwriting the other variant's fit, letting both be kept around and compared.
     """
     population_hash = hash_dataframe(df_filtered_to_test_code)[:16]
     log_suffix = "_log" if is_log_transform(test_code) else ""
