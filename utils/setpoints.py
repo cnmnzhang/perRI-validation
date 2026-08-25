@@ -10,7 +10,7 @@ A handful of markers (SEX_STRATIFIED_MARKERS below) are fit with sex-specific
 ("F"/"M") hyperparameters instead of the pooled "ALL" row, matching the live
 pipeline -- see compute_sp_df's _compute().
 
-A handful of markers (perri.is_log_transform) are fit in log-space instead of
+A handful of markers (is_log_transform below) are fit in log-space instead of
 raw units -- see _fit_batch_for_group().
 """
 
@@ -27,7 +27,8 @@ from utils.cache import cache_or_compute as _cache_or_compute
 from utils.cache import hash_dataframe
 from utils.clinical.get import popRI
 from utils.io import load_tests_marker_subset
-from perri import fit_batch, get_default_params, is_log_transform
+from perri import fit_batch, get_default_params
+from perri import is_log_transform as _perri_is_log_transform
 
 SP_DF_COLUMNS = [ID_COL, TEST_CODE_COL, MODEL_COL, TS_COL, MU, SIGMA, MEASUREMENT_COL, SEX_COL, INDEX_COL]
 
@@ -54,6 +55,25 @@ def is_sex_stratified(test_code: str) -> bool:
     """Return True if this marker should be fit with per-sex (F/M) hyperparameters
     instead of the pooled ALL row."""
     return test_code in SEX_STRATIFIED_MARKERS
+
+
+# TSH override: perri v0.3.0 bundles log_transformed=True for TSH, but a direct check
+# against this population's own ground truth (fig4_dx_cases hypothyroidism outcome's cv
+# odds ratio) shows log-space fitting is still clearly wrong here even after the grid-
+# bounds fix that resolved FER/GLU/TRIG -- log gives 1.4441 vs ground truth's 1.1989
+# (+20.5%), while raw-space gives 1.2004 (+0.1%, essentially exact). Improved from the
+# pre-fix +26.6% divergence but nowhere near resolved, so this repo keeps overriding
+# perri's per-marker default for TSH specifically rather than trusting it blindly.
+_LOG_TRANSFORM_EXCLUDE = frozenset({"TSH"})
+
+
+def is_log_transform(test_code: str) -> bool:
+    """Return True if this marker should be fit in log-space, per perri's bundled
+    default -- except for _LOG_TRANSFORM_EXCLUDE, which overrides that default based
+    on a direct check against this population's own ground truth."""
+    if test_code in _LOG_TRANSFORM_EXCLUDE:
+        return False
+    return _perri_is_log_transform(test_code)
 
 # Empirical reference-interval fallback for one-sided markers (e.g. HDL, pop_ri
 # upper bound = inf): the 95% reference interval computed from this population's
@@ -161,7 +181,7 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
     min_mu/max_mu/min_sigma/max_sigma unchanged only if that population has no
     isolated data to compute a patch from.
 
-    log_space=True (for markers where perri.is_log_transform is True) prefers
+    log_space=True (for markers where is_log_transform (this module) is True) prefers
     the positive-only empirical log-space patch (_compute_log_popri_patch) over a
     log-transformed pop_ri, matching the live pipeline's utils/get.py:
     get_log_model_constants now preferring utils.patch_popri's empirical log p2.5/
@@ -196,7 +216,7 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
 
 def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_measurements: int, n_jobs: int) -> pd.DataFrame:
     """fit_batch for one (test_code, sex_label) group, transparently handling
-    log-space fitting for markers where perri.is_log_transform is True.
+    log-space fitting for markers where is_log_transform (this module) is True.
 
     perri itself handles log-space fitting internally (log-transforms
     measurements before fitting, back-transforms mu/sigma after via the exact
@@ -236,7 +256,7 @@ def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_
     `sp_df_HB.csv`, which previously caused real cache thrashing (and, worse, real cached
     results getting overwritten by unrelated smoke-test runs sharing the same path).
 
-    Also embeds a `_log` suffix when perri.is_log_transform(test_code) is True -- so a
+    Also embeds a `_log` suffix when is_log_transform(test_code) (this module) is True -- so a
     marker flipping in/out of log-transformed status upstream (e.g. while investigating
     whether it should be log-transformed) produces a distinct cache file instead of
     silently overwriting the other variant's fit, letting both be kept around and compared.
