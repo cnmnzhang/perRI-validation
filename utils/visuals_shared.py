@@ -53,17 +53,32 @@ def year_since_baseline(ts, extend_days=90):
     return years.to_numpy(), years_est.to_numpy()
 
 
-def save_fig_as_svg(fig, title: str, path: Union[str, Path], csv_path: Optional[Union[str, Path]] = None) -> Path:
-    """Save `fig` as SVG to `path` and print a two-line "Figure: <path>" (+ "Data: <csv_path>"
-    if given) block, so console output links directly to what a run actually produced --
-    every script's real replacement for the noisy full manifest.json dump at the end of
-    main(). `csv_path` is informational only (any companion CSV is already written
-    separately by the caller before this is called, not written here).
+
+
+
+def save_fig_as_svg(
+    fig,
+    title: str,
+    path: Union[str, Path],
+    csv_path: Optional[Union[str, Path]] = None,
+    *,
+    dpi: int = 300,
+    also_png: bool = True,
+) -> Path:
+    """Save `fig` as SVG (and, by default, a sibling PNG at the same path with a `.png`
+    suffix) to `path`, and print a block linking console output to what a run actually
+    produced -- every script's real replacement for the noisy full manifest.json dump at
+    the end of main(). `csv_path` is informational only (any companion CSV is already
+    written separately by the caller before this is called, not written here).
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, format="svg")
+    fig.savefig(path, format="svg", dpi=dpi, facecolor="white", transparent=False)
     print(f"{title}\n\tFigure:\t{path}")
+    if also_png:
+        png_path = path.with_suffix(".png")
+        fig.savefig(png_path, format="png", dpi=dpi, facecolor="white", transparent=False)
+        print(f"\tPNG:\t{png_path}")
     if csv_path is not None:
         print(f"\tData:\t{csv_path}")
     return path
