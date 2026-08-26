@@ -57,23 +57,17 @@ def is_sex_stratified(test_code: str) -> bool:
     return test_code in SEX_STRATIFIED_MARKERS
 
 
-# TSH override: perri v0.3.0 bundles log_transformed=True for TSH, but a direct check
-# against this population's own ground truth (fig4_dx_cases hypothyroidism outcome's cv
-# odds ratio) shows log-space fitting is still clearly wrong here even after the grid-
-# bounds fix that resolved FER/GLU/TRIG -- log gives 1.4441 vs ground truth's 1.1989
-# (+20.5%), while raw-space gives 1.2004 (+0.1%, essentially exact). Improved from the
-# pre-fix +26.6% divergence but nowhere near resolved, so this repo keeps overriding
-# perri's per-marker default for TSH specifically rather than trusting it blindly.
-_LOG_TRANSFORM_EXCLUDE = frozenset({"TSH"})
-
-
-def is_log_transform(test_code: str) -> bool:
-    """Return True if this marker should be fit in log-space, per perri's bundled
-    default -- except for _LOG_TRANSFORM_EXCLUDE, which overrides that default based
-    on a direct check against this population's own ground truth."""
-    if test_code in _LOG_TRANSFORM_EXCLUDE:
-        return False
-    return _perri_is_log_transform(test_code)
+# No local override: perri v0.3.0's per-marker log_transform default (including TSH)
+# was checked directly against this population's own ground truth (fig4_dx_cases
+# hypothyroidism outcome's mu/cv odds ratios) using a fresh vendored ground-truth pull
+# (data/UWM/, regenerated after bayesian-setpoint-inference's log-transform hyperparameter
+# update) and matches almost exactly: log-space gives mu=1.1117/cv=1.4441 vs ground
+# truth's mu=1.1116/cv=1.4365 (+0.01%/+0.53%), while raw-space diverges (+12.2%/-16.4%).
+# An earlier version of this override forced TSH to raw-space based on a STALE ground-
+# truth snapshot (predating that hyperparameter update, where the live pipeline itself
+# still used raw-space TSH) -- that override is gone now that the ground truth has been
+# refreshed and confirms perri's log-space default is correct.
+is_log_transform = _perri_is_log_transform
 
 # Empirical reference-interval fallback for one-sided markers (e.g. HDL, pop_ri
 # upper bound = inf): the 95% reference interval computed from this population's
