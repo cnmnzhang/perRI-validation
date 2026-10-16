@@ -25,6 +25,8 @@ One row per patient per test over time, covering every marker needed. Analysis f
 
 Tests do not have to be isolated. Downstream `build_setpoints` will handle isolation. Deduplication is handled to avoid marking a test as non-isolated, when it is. 
 
+For `build_parametric_bounds`, supply A1C and HDL marker files that are already isolated; this stage uses their values as provided to calculate site bounds.
+
 >If your data is already partitioned by marker, you can skip `tests.csv`/`build_splits_by_marker` entirely and drop per-marker CSVs (same columns as Tests, above) straight into `data/cache/splits_by_marker/{test_code}.csv` yourself
 
 **Markers needed in `tests.csv`**, by analysis:
@@ -78,6 +80,7 @@ swimmer panel's cohort, laboratory, and infusion source tables are retained unde
 | script | purpose | question | notes|outputs | 
 |---|---|---|---|---|
 |[`splits_by_marker`](scripts/build_splits_by_marker.py)|creates dependencies||Splits `Tests` table into one file per marker present in `tests.csv`. Prerequisite for `fig3_dx`/`fig3_hazard`/`fig4_dx_cases`/`fig5_iron_infusion`|`data/cache/splits_by_marker/{marker}.csv`|
+|[`build_parametric_bounds`](scripts/build_parametric_bounds.py)|creates dependencies||Uses each complete A1C/HDL marker file to calculate site bounds from isolated measurements. Runs before setpoint fitting; no master `tests.csv` is required when marker files are provided.|`data/cache/site_bounds/{marker}_{sex}_{tag}.json`|
 |[`setpoints_by_marker`](scripts/build_setpoints.py)|creates dependencies||Uses previous outputs and fits all 43 markers in `TESTCODES_LIST`, filtered down to patients who have at least 3 setpoints for the given marker file (hence, `_m3`). Setpoints are calculated using the `perri` package, tracking its `main` branch (see `requirements.txt`)|`data/cache/sp_df_{marker}_full_m3.csv`|
 |[`dx_incident`](scripts/build_dx_incident.py)|creates dependencies||Uses `Dx` to derive the first diagnosis per patient for a given set of diagnoses, where multiple codes can match to the same diagnosis. We match on ICD10, with ICD9 fall back, using a hardcoded mapping in [`constants/icd_config.py`](constants/icd_config.py). Prerequisite for `fig3_dx` and `fig4_dx_cases`|`data/outputs/dx_incident/dx_incident.csv`|
 |[`fig3_hazard`](scripts/run_fig3_hazard.py)|figure analyses|Do personalized setpoint characteristics reproduce associations with mortality?|for each of the 43 markers, using the setpoint caches, fits a mortality Cox regression on the patient's personal setpoint (mu/sigma/cv, adjusted for age and sex). a. `fig3a_hr_by_model.svg` using each patient's 5th setpoint, and b. `fig3b_hr_by_baseline` using the setpoint from only their 1st through 5th isolated measurement, to see how hazard ratios stabilize as more data accumulates | `data/outputs/fig3_hazard/*` |
@@ -100,7 +103,7 @@ The use for this is
   
   2. Clinical reclassification confusion matrices and Kaplan-Meier logic require pop_ri bounds. 
   
-An exception is one-sided markers (only HDL, which has an infinite upper bound, where only "too low" is clinically abnormal). These markers are auto-detected, and `_params_override` will calculate an empirical reference interval.
+The marker config also declares bound policies. `build_parametric_bounds` uses the site's complete marker files to calculate A1C's empirical 0.5th/99.5th mu bounds and HDL's empirical open-side bound from isolated measurements. HDL keeps its finite clinical lower RI. These saved bounds are reused for all setpoint fits, including patient subsets; `log_lambda_` remains the tuned perRI default.
 
 
 ## Quickstart
@@ -115,6 +118,7 @@ time python -m run_all
 # Or one analysis at a time
 #### dependencies
 python -m scripts.build_splits_by_marker
+python -m scripts.build_parametric_bounds
 python -m scripts.build_setpoints
 python -m scripts.build_dx_incident
 #### Analysis

@@ -1,10 +1,8 @@
 """Setpoint computation via the perri package.
 
-The Bayesian model's grid bounds (min_mu/max_mu/max_sigma) are derived live
-from this repo's own pop_ri (constants/marker_config.py), not taken
-unchanged from perri's bundled hyperparameters -- see _params_override(). Only
-log_lambda_ still comes from perri's tuned defaults; overriding it needs a
-perri-level change (see README.md's "Adapting to a different population").
+Most grid bounds come from this repo's clinical pop_ri. A1C and HDL use the
+site-wide calibration built by scripts.build_parametric_bounds. log_lambda_
+still comes from perri's tuned defaults.
 
 A handful of markers (SEX_STRATIFIED_MARKERS below) are fit with sex-specific
 ("F"/"M") hyperparameters instead of the pooled "ALL" row, matching the live
@@ -29,6 +27,8 @@ from utils.clinical.get import popRI
 from utils.io import load_tests_marker_subset
 from perri import fit_batch, get_default_params
 from perri import is_log_transform as _perri_is_log_transform
+from constants.marker_lab_config import MARKER_CONFIG
+from utils.site_bounds import calibration_tag, get_site_bounds
 
 SP_DF_COLUMNS = [ID_COL, TEST_CODE_COL, MODEL_COL, TS_COL, MU, SIGMA, MEASUREMENT_COL, SEX_COL, INDEX_COL]
 
@@ -69,9 +69,11 @@ def is_sex_stratified(test_code: str) -> bool:
 # refreshed and confirms perri's log-space default is correct.
 is_log_transform = _perri_is_log_transform
 
-# Empirical reference-interval fallback for one-sided markers (e.g. HDL, pop_ri
-# upper bound = inf): the 95% reference interval computed from this population's
-# own isolated measurements, in place of a clinical pop_ri that has no finite bound.
+
+def _is_empirical(test_code: str) -> bool:
+    return MARKER_CONFIG.get(test_code, {}).get("mu_bound_policy", {}).get("method", "clinical_ri") != "clinical_ri"
+
+# Log-space markers use empirical percentiles of their isolated measurements.
 _LOWER_PCTL = 2.5
 _UPPER_PCTL = 97.5
 
@@ -126,23 +128,6 @@ def _isolated_values(df: pd.DataFrame) -> np.ndarray:
     return all_values[~np.isnan(all_values)]
 
 
-def _compute_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
-    """Empirical (patch_lower, patch_upper) reference interval for a one-sided marker,
-    computed from this population's own isolated measurements rather than from a
-    clinical pop_ri that has no finite bound to derive grid bounds from.
-
-    Returns None if there's no isolated data to compute a percentile from, or if the
-    population is too small/degenerate for p2.5/p97.5 to span a positive width (e.g.
-    a single distinct value) -- a zero-width grid divides by zero downstream in
-    bayesian_model.build_prior_flat.
-    """
-    all_values = _isolated_values(df)
-    if all_values.size == 0:
-        return None
-    low, high = float(np.percentile(all_values, _LOWER_PCTL)), float(np.percentile(all_values, _UPPER_PCTL))
-    return (low, high) if high > low else None
-
-
 def _compute_log_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
     """Positive-only empirical log-space (patch_lower, patch_upper), computed from
     this population's own isolated measurements -- matching the live pipeline's
@@ -164,16 +149,13 @@ def _compute_log_popri_patch(df: pd.DataFrame) -> "tuple[float, float] | None":
     return (low, high) if high > low else None
 
 
-def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_space: bool = False) -> dict:
+def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_space: bool = False, calibrated_bounds=None) -> dict:
     """Override one marker's grid parameters using the editable ``pop_ri`` read
     from ``constants/marker_lab_config.py``; retain perri's tuned ``log_lambda_``.
 
-    For one-sided markers (pop_ri with an infinite bound, e.g. HDL), pop_ri can't
-    define a finite grid width, so both bounds are replaced with an empirical
-    (patch_lower, patch_upper) reference interval computed from `df`'s own isolated
-    measurements (see _compute_popri_patch) -- falling back to perri's bundled
-    min_mu/max_mu/min_sigma/max_sigma unchanged only if that population has no
-    isolated data to compute a patch from.
+    Empirical-policy markers require calibrated_bounds from the complete site
+    marker file, built before fitting. Their bounds are never derived from `df`,
+    which may contain only a patient subset.
 
     log_space=True (for markers where is_log_transform (this module) is True) prefers
     the positive-only empirical log-space patch (_compute_log_popri_patch) over a
@@ -190,16 +172,19 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
     expansion.
     """
     params = get_default_params(test_code, sex=sex)
+    if _is_empirical(test_code):
+        if calibrated_bounds is None:
+            raise ValueError(f"{test_code} requires bounds from build_parametric_bounds")
+        params.update(calibrated_bounds)
+        return params
     if log_space:
         log_bounds = _compute_log_popri_patch(df)
         if log_bounds is not None:
             params.update(_grid_bounds_from_pop_ri(*log_bounds, log_space=True))
             return params
     low, high = popRI(sex=sex, test_code=test_code)
-    bounds = (low, high) if math.isfinite(low) and math.isfinite(high) else _compute_popri_patch(df)
-    if bounds is None:
-        return params
-    low, high = bounds
+    if not (math.isfinite(low) and math.isfinite(high)):
+        raise ValueError(f"{test_code} has an open clinical RI but no empirical bound policy")
     if log_space:
         log_hi = math.log(max(high, 1e-6))
         log_lo = math.log(low) if low > 0 else log_hi - 4.0
@@ -208,7 +193,7 @@ def _params_override(test_code: str, df: pd.DataFrame, sex: str = "ALL", log_spa
     return params
 
 
-def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_measurements: int, n_jobs: int) -> pd.DataFrame:
+def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_measurements: int, n_jobs: int, input_dir=None) -> pd.DataFrame:
     """fit_batch for one (test_code, sex_label) group, transparently handling
     log-space fitting for markers where is_log_transform (this module) is True.
 
@@ -220,6 +205,9 @@ def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_m
     its own) so _params_override can compute grid bounds in the matching space.
     """
     log_space = is_log_transform(test_code)
+    calibrated = None
+    if _is_empirical(test_code):
+        calibrated = get_site_bounds(test_code, sex_label, input_dir=input_dir)["bounds"]
     return fit_batch(
         df,
         value_col=MEASUREMENT_COL,
@@ -227,14 +215,14 @@ def _fit_batch_for_group(df: pd.DataFrame, test_code: str, sex_label: str, min_m
         patient_id_col=ID_COL,
         test_code=test_code,
         sex=sex_label,
-        params=_params_override(test_code, df, sex=sex_label, log_space=log_space),
+        params=_params_override(test_code, df, sex=sex_label, log_space=log_space, calibrated_bounds=calibrated),
         log_transform=log_space,
         min_measurements=min_measurements,
         n_jobs=n_jobs,
     )
 
 
-def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_measurements: int) -> str:
+def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_measurements: int, input_dir=None) -> str:
     """The cache filename compute_sp_df would use for this exact (already test_code-filtered)
     population -- shared by compute_sp_df itself and is_fitted (a cheap existence check with
     no fitting involved, e.g. so a caller can decide whether to reuse an already-fit
@@ -257,19 +245,20 @@ def _cache_name_for(df_filtered_to_test_code: pd.DataFrame, test_code: str, min_
     """
     population_hash = hash_dataframe(df_filtered_to_test_code)[:16]
     log_suffix = "_log" if is_log_transform(test_code) else ""
-    return f"sp_df_{test_code}_{population_hash}_m{min_measurements}{log_suffix}.csv"
+    bound_suffix = f"_{calibration_tag(test_code, input_dir)}" if _is_empirical(test_code) else ""
+    return f"sp_df_{test_code}_{population_hash}_m{min_measurements}{log_suffix}{bound_suffix}.csv"
 
 
-def is_fitted(tests_df: pd.DataFrame, test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
+def is_fitted(tests_df: pd.DataFrame, test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS, input_dir=None) -> bool:
     """Whether compute_sp_df(tests_df, test_code, min_measurements=...) is already cached --
     without fitting anything. `tests_df` need not be pre-filtered to test_code."""
     df = tests_df[tests_df[TEST_CODE_COL] == test_code]
     if df.empty:
         return False
-    return (CACHE_DIR / _cache_name_for(df, test_code, min_measurements)).exists()
+    return (CACHE_DIR / _cache_name_for(df, test_code, min_measurements, input_dir)).exists()
 
 
-def _full_population_cache_name(test_code: str, min_measurements: int) -> str:
+def _full_population_cache_name(test_code: str, min_measurements: int, input_dir=None) -> str:
     """The cache filename for a marker's full, unfiltered population -- no content-hash
     fingerprint, just test_code + min_measurements. Only valid when the caller trusts
     tests_df (when supplied) is that marker's whole splits_by_marker split with no cohort
@@ -284,13 +273,14 @@ def _full_population_cache_name(test_code: str, min_measurements: int) -> str:
     docstring for why.
     """
     log_suffix = "_log" if is_log_transform(test_code) else ""
-    return f"sp_df_{test_code}_full_m{min_measurements}{log_suffix}.csv"
+    bound_suffix = f"_{calibration_tag(test_code, input_dir)}" if _is_empirical(test_code) else ""
+    return f"sp_df_{test_code}_full_m{min_measurements}{log_suffix}{bound_suffix}.csv"
 
 
-def is_fitted_full_population(test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS) -> bool:
+def is_fitted_full_population(test_code: str, min_measurements: int = DEFAULT_MIN_MEASUREMENTS, input_dir=None) -> bool:
     """Whether the marker's full-population cache file already exists --
     no tests_df needed at all, unlike is_fitted."""
-    return (CACHE_DIR / _full_population_cache_name(test_code, min_measurements)).exists()
+    return (CACHE_DIR / _full_population_cache_name(test_code, min_measurements, input_dir)).exists()
 
 
 def fit_markers(input_dir, test_codes: list, *, force: bool = False, min_measurements: int = DEFAULT_MIN_MEASUREMENTS, label: str = "setpoints") -> pd.DataFrame:
@@ -310,10 +300,10 @@ def fit_markers(input_dir, test_codes: list, *, force: bool = False, min_measure
     sp_frames = []
     for i, test_code in enumerate(test_codes, 1):
         t0 = time.time()
-        already_fitted = not force and is_fitted_full_population(test_code, min_measurements)
-        tests_df = None if already_fitted else load_tests_marker_subset(input_dir, test_codes=[test_code])
         try:
-            sp = compute_sp_df(tests_df, test_code=test_code, force=force, min_measurements=min_measurements, full_population=True)
+            already_fitted = not force and is_fitted_full_population(test_code, min_measurements, input_dir)
+            tests_df = None if already_fitted else load_tests_marker_subset(input_dir, test_codes=[test_code])
+            sp = compute_sp_df(tests_df, test_code=test_code, force=force, min_measurements=min_measurements, full_population=True, input_dir=input_dir)
         except Exception as exc:
             print(f"{label}: [{i}/{len(test_codes)}] {test_code}: SKIPPED, fit failed: {exc}")
             continue
@@ -375,12 +365,12 @@ def compute_sp_df(
     [anon_id, test_code, model, ts, mu, sigma, result_value, sex, index].
     """
     if full_population:
-        cache_name = _full_population_cache_name(test_code, min_measurements)
+        cache_name = _full_population_cache_name(test_code, min_measurements, input_dir)
     else:
         df = tests_df[tests_df[TEST_CODE_COL] == test_code]
         if df.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)
-        cache_name = _cache_name_for(df, test_code, min_measurements)
+        cache_name = _cache_name_for(df, test_code, min_measurements, input_dir)
 
     def _compute() -> pd.DataFrame:
         nonlocal tests_df
@@ -399,10 +389,10 @@ def compute_sp_df(
                 sex_df = df[df[SEX_COL] == sex_label]
                 if sex_df.empty:
                     continue
-                fitted_frames.append(_fit_batch_for_group(sex_df, test_code, sex_label, min_measurements, n_jobs))
+                fitted_frames.append(_fit_batch_for_group(sex_df, test_code, sex_label, min_measurements, n_jobs, input_dir))
             fitted = pd.concat(fitted_frames, ignore_index=True) if fitted_frames else pd.DataFrame()
         else:
-            fitted = _fit_batch_for_group(df, test_code, "ALL", min_measurements, n_jobs)
+            fitted = _fit_batch_for_group(df, test_code, "ALL", min_measurements, n_jobs, input_dir)
         if fitted.empty:
             return pd.DataFrame(columns=SP_DF_COLUMNS)
 

@@ -10,8 +10,11 @@ import pytest
 
 import utils.setpoints as setpoints_module
 from constants.runtime import DEFAULT_MIN_MEASUREMENTS
+from constants.marker_config import POP_REF_INTERVAL
 from scripts.build_splits_by_marker import build_splits_by_marker
-from utils.setpoints import SP_DF_COLUMNS, _compute_popri_patch, _grid_bounds_from_pop_ri, _params_override, compute_sp_df, fit_markers, is_fitted, is_fitted_full_population
+from scripts.build_parametric_bounds import run as build_parametric_bounds
+from utils.site_bounds import get_site_bounds
+from utils.setpoints import SP_DF_COLUMNS, _grid_bounds_from_pop_ri, _params_override, compute_sp_df, fit_markers, is_fitted, is_fitted_full_population
 
 
 @pytest.fixture(autouse=True)
@@ -114,36 +117,46 @@ def _multi_patient_isolated_series(test_code, values_by_patient, n=8, gap_days=1
     return pd.concat(frames, ignore_index=True)
 
 
-def test_popri_patch_computed_from_isolated_measurements_for_one_sided_marker():
-    """HDL's pop_ri has an infinite upper bound (constants/marker_lab_config.py), so
-    _params_override must fall back to an empirical patch computed from this population's
-    own isolated measurements rather than perri's bundled defaults."""
+def test_hdl_requires_saved_site_bounds():
     tests_df = _multi_patient_isolated_series("HDL", {f"p{i}": v for i, v in enumerate([30, 40, 50, 60, 70, 80, 90, 100])})
-
-    patch = _compute_popri_patch(tests_df)
-    assert patch is not None
-    patch_lower, patch_upper = patch
-    assert patch_lower < patch_upper
-
-    expected = _grid_bounds_from_pop_ri(patch_lower, patch_upper)
-    params = _params_override("HDL", tests_df, sex="ALL")
-    assert params["min_mu"] == pytest.approx(expected["min_mu"])
-    assert params["max_mu"] == pytest.approx(expected["max_mu"])
-    assert params["max_sigma"] == pytest.approx(expected["max_sigma"])
+    with pytest.raises(ValueError, match="build_parametric_bounds"):
+        _params_override("HDL", tests_df, sex="ALL")
 
 
-def test_popri_patch_is_none_when_no_isolated_data():
-    tests_df = _isolated_series("p1", "F", n=8, gap_days=30)  # too densely spaced to be isolated
-    assert _compute_popri_patch(tests_df) is None
+@pytest.mark.parametrize("test_code, sex, expected_ri", [
+    ("RBC", "ALL", (3.8, 5.6)),
+    ("RBC", "F", (3.8, 5.0)),
+    ("RBC", "M", (4.4, 5.6)),
+    ("RDWCV", "ALL", (11.0, 14.5)),
+    ("RDWCV", "F", (11.0, 14.5)),
+    ("RDWCV", "M", (11.0, 14.5)),
+])
+def test_rbc_rdwcv_grid_uses_updated_population_intervals(test_code, sex, expected_ri):
+    assert POP_REF_INTERVAL[sex][test_code] == expected_ri
+    tests_df = _isolated_series("p1", sex).assign(test_code=test_code)
+    params = _params_override(test_code, tests_df, sex=sex)
+    expected_bounds = _grid_bounds_from_pop_ri(*expected_ri)
+    assert all(params[key] == pytest.approx(value) for key, value in expected_bounds.items())
+    assert params["log_lambda_"] == setpoints_module.get_default_params(test_code, sex)["log_lambda_"]
 
 
-def test_hdl_setpoints_fit_end_to_end_via_empirical_patch(tmp_path, monkeypatch):
+def test_hdl_subset_fit_uses_full_site_bounds(tmp_path, monkeypatch):
     monkeypatch.setattr(setpoints_module, "CACHE_DIR", tmp_path / "cache")
-    tests_df = _multi_patient_isolated_series("HDL", {f"p{i}": v for i in range(20) for v in [np.random.default_rng(i).normal(55, 10)]})
+    input_dir = tmp_path / "data"
+    marker_dir = input_dir / "cache" / "splits_by_marker"
+    marker_dir.mkdir(parents=True)
+    tests_df = _multi_patient_isolated_series("HDL", {f"p{i}": float(30 + i * 3) for i in range(20)})
+    tests_df.to_csv(marker_dir / "HDL.csv", index=False)
+    build_parametric_bounds(input_dir=input_dir, output_dir=tmp_path / "out")
+    saved = get_site_bounds("HDL", "F", input_dir=input_dir)
+    assert saved["n_measurements"] == len(tests_df)
+    subset = tests_df[tests_df["anon_id"].isin(["p0", "p1"])]
 
-    sp_df = compute_sp_df(tests_df, test_code="HDL", force=True)
+    sp_df = compute_sp_df(subset, test_code="HDL", force=True, input_dir=input_dir)
     assert not sp_df.empty
     assert (sp_df["test_code"] == "HDL").all()
+    params = _params_override("HDL", subset, sex="F", calibrated_bounds=saved["bounds"])
+    assert params["max_mu"] == saved["bounds"]["max_mu"]
 
 
 def test_is_fitted_false_before_and_true_after_compute_sp_df():

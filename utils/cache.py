@@ -4,6 +4,7 @@ Primary entry point: ``cache_or_compute``.
 """
 
 import hashlib
+import json
 import pickle
 from pathlib import Path
 from typing import Any, Callable, Union
@@ -34,7 +35,7 @@ def cache_or_compute(
         path: Path to cache file.
         compute_fn: Function to compute data if not cached.
         force: If True, recompute even if cache exists.
-        file_format: File format for saving. Options: "auto", "pickle", "csv", "parquet".
+        file_format: File format for saving. Options: "auto", "pickle", "json", "csv", "parquet".
             "auto" infers from file extension.
 
     Returns:
@@ -46,6 +47,8 @@ def cache_or_compute(
         suffix = path.suffix.lower()
         if suffix in (".pkl", ".pickle"):
             file_format = "pickle"
+        elif suffix == ".json":
+            file_format = "json"
         elif suffix == ".csv":
             file_format = "csv"
         elif suffix == ".parquet":
@@ -58,6 +61,9 @@ def cache_or_compute(
         if file_format == "pickle":
             with open(path, "rb") as f:
                 return pickle.load(f)
+        elif file_format == "json":
+            with open(path) as f:
+                return json.load(f)
         elif file_format == "csv":
             return pd.read_csv(path)
         elif file_format == "parquet":
@@ -76,6 +82,10 @@ def cache_or_compute(
     if file_format == "pickle":
         with open(path, "wb") as f:
             pickle.dump(data, f)
+    elif file_format == "json":
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+            f.write("\n")
     elif file_format == "csv":
         if isinstance(data, pd.DataFrame):
             data.to_csv(path, index=False)

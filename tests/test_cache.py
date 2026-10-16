@@ -51,6 +51,13 @@ def test_pickle_format_roundtrips_arbitrary_objects(tmp_path):
     assert cached == {"nested": [1, 2, {"x": "y"}]}
 
 
+def test_json_format_roundtrips_bounds_artifact(tmp_path):
+    path = tmp_path / "site_bounds" / "A1C_ALL.json"
+    bounds = {"bounds": {"min_mu": 4.5, "max_mu": 12.8}, "n_measurements": 100}
+    assert cache_or_compute(path, lambda: bounds) == bounds
+    assert cache_or_compute(path, lambda: pytest.fail("should not recompute")) == bounds
+
+
 def test_hash_dataframe_is_order_independent():
     df1 = pd.DataFrame({"a": [1, 2], "b": ["x", "y"]})
     df2 = df1.iloc[::-1].reset_index(drop=True)

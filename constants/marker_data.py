@@ -21,8 +21,8 @@ MARKER_CONFIG = {
     "HCT":   {"battery": "CBC",          "units": "%",         "full_name": "Hematocrit",                              "pop_ri": {"F": (36.0, 45.0),  "M": (38.0, 50.0)}},
     "MCV":   {"battery": "CBC",          "units": "fL",        "full_name": "Mean Corpuscular Volume",                 "pop_ri": {"F": (81, 98),       "M": (81, 98)}},
     "MCHC":  {"battery": "CBC",          "units": "g/dL",      "full_name": "Mean Corpuscular Hemoglobin Concentration","pop_ri": {"F": (32.2, 36.5),  "M": (32.2, 36.5)}},
-    "RBC":   {"battery": "CBC",          "units": "x10^6/uL",  "full_name": "Red Blood Cell Count",                    "pop_ri": {"F": (3.8, 6.0),    "M": (4.4, 5.6)}},
-    "RDWCV": {"battery": "CBC",          "units": "%",         "full_name": "Red Cell Distribution Width (CV)",        "pop_ri": {"F": (10, 14.5),    "M": (10, 14.5)}},
+    "RBC":   {"battery": "CBC",          "units": "x10^6/uL",  "full_name": "Red Blood Cell Count",                    "pop_ri": {"F": (3.8, 5.0),    "M": (4.4, 5.6)}},
+    "RDWCV": {"battery": "CBC",          "units": "%",         "full_name": "Red Cell Distribution Width (CV)",        "pop_ri": {"F": (11.0, 14.5),  "M": (11.0, 14.5)}},
 
     # ── BMP ───────────────────────────────────────────────────────────────────
     "NA":    {"battery": "BMP",          "units": "mEq/L",     "full_name": "Sodium",                                  "pop_ri": {"F": (135, 145),    "M": (135, 145)}},
@@ -86,7 +86,7 @@ MARKER_CONFIG = {
     # ── Lipid panel ───────────────────────────────────────────────────────────
     "CHOL":   {"battery": "Lipid",       "units": "mg/dL",     "full_name": "Total Cholesterol",                       "pop_ri": {"F": (0, 210),       "M": (0, 210)}},
     "TRIG":   {"battery": "Lipid",       "units": "mg/dL",     "full_name": "Triglycerides",                           "pop_ri": {"F": (0, 175),       "M": (0, 175)}, "log_transform": True},
-    "HDL":    {"battery": "Lipid",       "units": "mg/dL",     "full_name": "HDL Cholesterol",                         "pop_ri": {"F": (49, float("inf")), "M": (39, float("inf"))}},
+    "HDL":    {"battery": "Lipid",       "units": "mg/dL",     "full_name": "HDL Cholesterol",                         "pop_ri": {"F": (49, float("inf")), "M": (39, float("inf"))}, "mu_bound_policy": {"method": "empirical_open_side", "percentiles": (2.5, 97.5)}},
     "NONHDL": {"battery": "Lipid",       "units": "mg/dL",     "full_name": "Non-HDL Cholesterol",                     "pop_ri": {"F": (0, 190),       "M": (0, 190)}},
     # "LDLN":   {"battery": "Lipid",       "units": "mg/dL",     "pop_ri": {"F": (0, 160),       "M": (0, 160)}},
     "LDL":    {"battery": "Lipid",       "units": "mg/dL",     "full_name": "LDL Cholesterol",                         "pop_ri": {"F": (0, 130),       "M": (0, 130)}},
@@ -104,5 +104,5 @@ MARKER_CONFIG = {
     "TSH":    {"battery": "Misc",        "units": "mIU/L",     "full_name": "Thyroid-Stimulating Hormone",             "pop_ri": {"F": (0.4, 5.0),    "M": (0.4, 5.0)}, "log_transform": True},
     "FER":    {"battery": "Misc",        "units": "ng/mL",     "full_name": "Ferritin",                                "pop_ri": {"F": (10, 180),      "M": (20, 230)}, "log_transform": True},
     "VITDT":  {"battery": "Misc",        "units": "ng/mL",     "full_name": "Vitamin D (25-OH)",                       "pop_ri": {"F": (20.1, 50.0),  "M": (20.1, 50.0)}},
-    "A1C":    {"battery": "Misc",        "units": "%",         "full_name": "Hemoglobin A1c",                          "pop_ri": {"F": (4.0, 5.6),    "M": (4.0, 5.6)}, "log_transform": True},
+    "A1C":    {"battery": "Misc",        "units": "%",         "full_name": "Hemoglobin A1c",                          "pop_ri": {"F": (4.0, 5.6),    "M": (4.0, 5.6)}, "log_transform": True, "mu_bound_policy": {"method": "empirical_mu", "percentiles": (0.5, 99.5)}},
 }

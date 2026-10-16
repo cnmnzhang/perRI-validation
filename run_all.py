@@ -20,10 +20,12 @@ from scripts import build_dx_incident, run_fig3_dx, run_fig3_hazard, run_fig4_dx
 ensure_importable()
 
 from utils.logging_utils import tagged_stdout  # noqa: E402
-from scripts import build_setpoints  # noqa: E402
+from utils.io import splits_by_marker_dir  # noqa: E402
+from scripts import build_parametric_bounds, build_setpoints  # noqa: E402
 
 ANALYSES = {
     "splits_by_marker": build_splits_by_marker.run,
+    "build_parametric_bounds": build_parametric_bounds.run,
     "setpoints_by_marker": build_setpoints.run,
     "dx_incident": build_dx_incident.run,
     "fig3_hazard": run_fig3_hazard.run,
@@ -50,6 +52,14 @@ def main(argv: list[str] | None = None) -> None:
     elapsed = {}
     for name, fn in targets.items():
         print(f"\n{'=' * 20} {name} {'=' * 20}")
+        if name == "splits_by_marker" and args.analysis == "all":
+            has_master = (args.input_dir / "tests.csv").exists() or (args.input_dir / "tests.csv.gz").exists()
+            marker_dir = splits_by_marker_dir(args.input_dir)
+            if not has_master and marker_dir.is_dir() and any(marker_dir.glob("*.csv")):
+                print(f"[{name}] using site-provided marker files in {marker_dir}; no master Tests table to split")
+                manifests[name] = {"source": "site-provided marker files", "marker_dir": str(marker_dir)}
+                elapsed[name] = 0.0
+                continue
         kwargs = {"input_dir": args.input_dir, "output_dir": args.output_dir / name, "force": args.force}
         if name in _NEEDS_dx_incident:
             kwargs["dx_incident_path"] = args.output_dir / "dx_incident" / "dx_incident.csv"

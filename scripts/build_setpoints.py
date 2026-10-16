@@ -4,11 +4,9 @@ Fits TESTCODES_LIST specifically (all 43 pipeline markers), not every marker pre
 tests.csv: T4FR, for example, is read directly off the Tests table by fig4_dx_cases's
 lab_threshold outcome check and never passed to compute_sp_df, so it's not fit here.
 
-Required inputs: `tests.csv` (anon_id, ts, test_code, result_value, sex) covering all 43
-pipeline markers -- see README.md. Reads its markers from the per-marker
-split built by `scripts.build_splits_by_marker` -- run that first (or use
-`run_all`, which sequences it automatically); raises a clear FileNotFoundError with the
-command to run if it hasn't been built yet.
+Required inputs: per-marker CSVs in data/cache/splits_by_marker (built from
+tests.csv or provided by the site). Run build_parametric_bounds first for A1C
+and HDL; run_all sequences these dependency stages automatically.
 
 Run:
     python -m scripts.build_setpoints 
